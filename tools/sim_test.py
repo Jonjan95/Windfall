@@ -440,9 +440,11 @@ print(rt.eval(r'''(function()
   end
   sh("route opened, not at the AH")
   P.route.onOnClick(P.route, "RightButton"); out[#out+1] = "route: right-click target -> "..P.route.text
-  -- at the auction house
-  ev2 = S.onOnEvent
-  ev2(S, "AUCTION_HOUSE_SHOW")
+  -- events go to every addon frame, as in the game
+  ev2 = function(_, e, ...) for _, h in ipairs(handlers) do h(nil, e, ...) end end
+  -- the auction house is already open when the route is opened (the case from the screenshot)
+  AuctionHouseFrame = CreateFrame("Frame"); AuctionHouseFrame.shown = true
+  S:Hide(); P.route.onOnClick(P.route, "LeftButton")
   local row; for i = 1, 6 do if S.rows[i]:IsShown() and S.rows[i].buy:IsShown() then row = S.rows[i] break end end
   sh("AH open")
   row.buy.onOnClick(row.buy); out[#out+1] = "ah: searched itemKey="..tostring(lastSearch).." button="..row.buy.text

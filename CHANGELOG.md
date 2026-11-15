@@ -2,6 +2,11 @@
 
 All changes to Windfall, newest first. After an update, type `/reload` in game (or restart the game when the notes say so).
 
+## [0.2.22] - 2026-11-15
+
+- **Buy buttons now show when you open a shopping list at the auction house.** Before, they only showed if the list was already open when you walked up to it. The list also docks next to the auction house either way.
+- The shopping list is wider, so long prices no longer run into the amounts.
+
 ## [0.2.21] - 2026-11-15
 
 - **Levelling route:** in the Professions window's levelling plan, *Route to 150* (right-click for another target) works out every step from your skill to the target - which recipe, roughly how many crafts, where to train the next rank - and adds up all the materials, less what is in your bags. The craft counts are an estimate.

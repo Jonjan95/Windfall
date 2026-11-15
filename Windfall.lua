@@ -2623,10 +2623,10 @@ local shopFrame
 local shop = { title = "", lines = {}, items = {}, crafts = 5 }
 local SHOP_STEP_ROWS = 8
 local SHOP_ROWS = 10
-local SHOP_WIDTH = 440
+local SHOP_WIDTH = 520
 local ahOpen = false
 local buying                    -- the item being bought: { id, qty, step, ... }
-local RefreshShoppingList
+local RefreshShoppingList, DockToAuctionHouse
 
 local function BagCountOf(itemID)
     local count = (C_Item and C_Item.GetItemCount) or GetItemCount
@@ -2765,12 +2765,9 @@ local function OnAuctionEvent(event, ...)
             if item.need * (shop.crafts and shop.single and shop.crafts or 1) > BagCountOf(item.id) then anything = true end
         end
         if anything and shopFrame then
-            local ahFrame = _G.AuctionHouseFrame
-            if ahFrame then
-                shopFrame:ClearAllPoints()
-                shopFrame:SetPoint("TOPLEFT", ahFrame, "TOPRIGHT", 8, 0)
-            end
             shopFrame:Show()
+            -- The auction house frame is shown just after this event.
+            C_Timer.After(0, DockToAuctionHouse)
         end
     elseif event == "AUCTION_HOUSE_CLOSED" then
         ahOpen = false
@@ -2897,11 +2894,11 @@ local function BuildShoppingFrame()
         row:SetSize(SHOP_WIDTH - 16, 20)
         row.name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         row.name:SetPoint("LEFT", 4, 0)
-        row.name:SetWidth(150)
+        row.name:SetWidth(170)
         row.name:SetJustifyH("LEFT")
         row.name:SetWordWrap(false)
         row.need = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        row.need:SetPoint("LEFT", 158, 0)
+        row.need:SetPoint("LEFT", 178, 0)
         row.total = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         row.total:SetPoint("RIGHT", -74, 0)
         row.buy = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
@@ -2918,23 +2915,43 @@ local function BuildShoppingFrame()
     f.status:SetWidth(SHOP_WIDTH - 24)
     f.status:SetJustifyH("LEFT")
 
-    f:SetScript("OnEvent", function(_, event, ...)
-        if event == "BAG_UPDATE_DELAYED" then RefreshShoppingList() else OnAuctionEvent(event, ...) end
-    end)
-    for _, event in ipairs({ "BAG_UPDATE_DELAYED", "AUCTION_HOUSE_SHOW", "AUCTION_HOUSE_CLOSED",
-        "COMMODITY_SEARCH_RESULTS_UPDATED", "ITEM_SEARCH_RESULTS_UPDATED", "COMMODITY_PRICE_UPDATED",
-        "COMMODITY_PRICE_UNAVAILABLE", "COMMODITY_PURCHASE_SUCCEEDED", "COMMODITY_PURCHASE_FAILED" }) do
-        pcall(f.RegisterEvent, f, event)
-    end
     f:SetScript("OnHide", function() StopBuying() end)
     return f
+end
+
+-- Next to the auction house, when it is open.
+function DockToAuctionHouse()
+    local ahFrame = _G.AuctionHouseFrame
+    if shopFrame and ahFrame and ahFrame:IsShown() then
+        shopFrame:ClearAllPoints()
+        shopFrame:SetPoint("TOPLEFT", ahFrame, "TOPRIGHT", 8, 0)
+    end
 end
 
 local function OpenShopping()
     shopFrame = shopFrame or BuildShoppingFrame()
     StopBuying()
+    -- Opened while already at the auction house: the "opened" event has gone by.
+    local ahFrame = _G.AuctionHouseFrame
+    ahOpen = ahFrame and ahFrame:IsShown() and true or false
+    if ahOpen then DockToAuctionHouse() end
     shopFrame:Show()
     RefreshShoppingList()
+end
+
+-- Listens from the start, so the auction house opening is never missed.
+local auctionEvents = CreateFrame("Frame")
+auctionEvents:SetScript("OnEvent", function(_, event, ...)
+    if event == "BAG_UPDATE_DELAYED" then
+        if RefreshShoppingList then RefreshShoppingList() end
+    else
+        OnAuctionEvent(event, ...)
+    end
+end)
+for _, event in ipairs({ "BAG_UPDATE_DELAYED", "AUCTION_HOUSE_SHOW", "AUCTION_HOUSE_CLOSED",
+    "COMMODITY_SEARCH_RESULTS_UPDATED", "ITEM_SEARCH_RESULTS_UPDATED", "COMMODITY_PRICE_UPDATED",
+    "COMMODITY_PRICE_UNAVAILABLE", "COMMODITY_PURCHASE_SUCCEEDED", "COMMODITY_PURCHASE_FAILED" }) do
+    pcall(auctionEvents.RegisterEvent, auctionEvents, event)
 end
 
 -- One recipe, a number of crafts.
