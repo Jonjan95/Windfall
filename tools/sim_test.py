@@ -156,6 +156,7 @@ _ns = rt.eval('{}')
 _load = rt.eval('function(src, name) return assert(loadstring(src, name)) end')
 for _path in [os.path.join(os.path.dirname(os.path.abspath(sys.argv[2])), 'Data', n) for n in ('Recipes.lua', 'SkillUps.lua')] + [sys.argv[2]]:
     _load(open(_path, encoding='utf-8').read(), '=' + os.path.basename(_path))('Windfall', _ns)
+rt.globals().WF_NS = _ns
 print(rt.eval(r'''(function()
   local ev = handlers[#handlers]
   local out = {}
@@ -183,16 +184,16 @@ print(rt.eval(r'''(function()
   dump("gather")
   SlashCmdList.WINDFALL("loot"); dump("loot")
   SlashCmdList.WINDFALL("mode"); out[#out+1] = "mode back to "..WindfallDB.mode
-  local b = WindfallMinimapButton; b.onOnEnter(b); b.onOnClick(b,"RightButton"); out[#out+1]="minimap right-click -> "..WindfallDB.mode
-  b.onOnClick(b,"LeftButton"); out[#out+1]="minimap left-click -> window shown: "..tostring(f:IsShown())
+  local b = WindfallBar.money; b.onOnClick(b,"RightButton"); out[#out+1]="bar right-click -> "..WindfallDB.mode
+  WF_NS.dev.OpenFarming(); out[#out+1]="farming page -> shown: "..tostring(f:IsShown())
   -- zone history
   local function hist(tag)
     local h = WindfallHistoryFrame
     out[#out+1] = "## history "..tag..": "..h.title.text.." | hint="..tostring(h.hint.text)
     for i=1,4 do if h.rows[i].zone.text ~= "" then out[#out+1] = "   "..h.rows[i].zone.text.." | "..h.rows[i].rate.text.." | "..h.rows[i].time.text.." | "..h.rows[i].runs.text end end
   end
-  if not f:IsShown() then b.onOnClick(b,"LeftButton") end
-  SlashCmdList.WINDFALL("gather"); SlashCmdList.WINDFALL("zones")
+  if not f:IsShown() then WF_NS.dev.OpenFarming() end
+  SlashCmdList.WINDFALL("gather"); WF_NS.dev.ToggleHistory()
   hist("live session, gather")
   SlashCmdList.WINDFALL("reset")
   out[#out+1] = "after reset: "..f.total.text.." "..f.time.text
@@ -306,7 +307,7 @@ print(rt.eval(r'''(function()
   SlashCmdList.WINDFALL("autoloot"); st("auto loot option off")
   SlashCmdList.WINDFALL("autoloot"); SlashCmdList.WINDFALL("fish"); now = now + 1; runTimers(); st("fishing switched off")
   -- settings window and fishing guide
-  SlashCmdList.WINDFALL("settings")
+  WF_NS.dev.ToggleSettings()
   local sf = WindfallSettingsFrame
   local function checks()
     local t = {}
@@ -317,14 +318,13 @@ print(rt.eval(r'''(function()
   local function click(i, v) local c = sf.checks[i]; c.checked = v; c.onOnClick(c) end
   click(2, false); click(5, false); click(1, true)
   out[#out+1] = "after clicks: fishEquip="..tostring(WindfallDB.fishEquip).." fishLoot="..tostring(WindfallDB.fishLoot).." fishOn="..tostring(WindfallDB.fishOn).." mainhand="..tostring(mainhand).." autoLoot="..cvars.autoLootDefault
-  click(9, false); out[#out+1] = "minimap hidden="..tostring(WindfallDB.minimapHidden).." button shown="..tostring(WindfallMinimapButton:IsShown())
-  click(9, true); click(2, true); click(5, true); click(1, false)
+  click(2, true); click(5, true); click(1, false)
   out[#out+1] = "settings after restore:\n      "..checks()
   skill = {75, 75, 0}; zone = "Eastern Plaguelands"; faction = "Alliance"
   skill = {130, 150, 75}; zone = "Stranglethorn Vale"; faction = "Horde"
   -- getaway line
   local function ga(label) out[#out+1] = "getaway: "..label.." -> '"..tostring(f.getaway.text).."' height="..tostring(f.h) end
-  if not f:IsShown() then SlashCmdList.WINDFALL("") end
+  if not f:IsShown() then WF_NS.dev.OpenFarming() end
   skill = {75, 75, 0}; zone = "Stormwind City"
   ga("fishing key off")
   SlashCmdList.WINDFALL("fish"); ga("key on, 75 in Stormwind")
@@ -348,7 +348,7 @@ print(rt.eval(r'''(function()
   soft = { guid = "GameObject-4", name = "Sturdy Locked Chest" }; sparkleTick(); sp("chest")
   soft = { guid = "GameObject-5", name = "Stonescale Eel Swarm" }; sparkleTick(); sp("fishing pool, no Fishing skill")
   skill = {100, 150, 0}; ev(nil, "SKILL_LINES_CHANGED"); sparkleTick(); sp("fishing pool, Fishing learned")
-  SlashCmdList.WINDFALL("settings"); local sf2 = WindfallSettingsFrame
+  WF_NS.dev.ToggleSettings(); local sf2 = WindfallSettingsFrame
   for _, c in ipairs(sf2.checks) do if c.label.text == "    Fishing pools" then c.checked = false; c.onOnClick(c) end end
   sparkleTick(); sp("fishing pools unticked")
   soft = { guid = "GameObject-6", name = "Peacebloom" }; plateMissing = true; sparkleTick(); sp("herb, nameplate not there yet")
@@ -392,7 +392,7 @@ print(rt.eval(r'''(function()
       out[#out+1] = "        "..tostring(rawget(D.money, "text")):gsub("\n", " / ")
     end
   end
-  SlashCmdList.WINDFALL("prof"); pw("before any profession window")
+  WF_NS.dev.ToggleProfessions(); pw("before any profession window")
   player = "Jonis"; class = "PALADIN"
   trade = { name = "Tailoring", skill = 120, max = 150, recipes = {
     [101] = { name = "Bolt of Silk Cloth", item = 4305, rd = 0, reagents = { {4306, 4} } },
@@ -431,7 +431,7 @@ print(rt.eval(r'''(function()
   } }
   ev(nil, "TRADE_SKILL_SHOW"); runTimers()
   local P = WindfallProfessionsFrame
-  if not P:IsShown() then SlashCmdList.WINDFALL("prof") end
+  if not P:IsShown() then WF_NS.dev.ToggleProfessions() end
   profPick = function() end
   while P.profButton.text ~= "Leatherworking" or not tostring(P.charButton.text):find("Huntie") do
     if not tostring(P.charButton.text):find("Huntie") then P.charButton.onOnClick(P.charButton) else P.profButton.onOnClick(P.profButton) end
@@ -453,7 +453,7 @@ print(rt.eval(r'''(function()
     for i = 1, 6 do local r = S.rows[i]; if r:IsShown() then out[#out+1] = "      mat "..r.name.text.." | "..r.need.text.." | "..r.total.text.." | buy="..(r.buy:IsShown() and r.buy.text or "-") end end
   end
   sh("route opened, not at the AH")
-  if not P:IsShown() then SlashCmdList.WINDFALL("prof") end -- one page at a time: back to Professions
+  if not P:IsShown() then WF_NS.dev.ToggleProfessions() end -- one page at a time: back to Professions
   P.route.onOnClick(P.route, "RightButton"); out[#out+1] = "route: right-click target -> "..P.route.text
   -- events go to every addon frame, as in the game
   ev2 = function(_, e, ...) for _, h in ipairs(handlers) do h(nil, e, ...) end end
@@ -532,7 +532,7 @@ print(rt.eval(r'''(function()
   trade.recipes[3779] = { name = "Barbaric Belt", item = 4264, rd = 0, reagents = { {2318, 6}, {2320, 2} } }
   ev(nil, "TRADE_SKILL_LIST_UPDATE"); runTimers()
   local PF = WindfallProfessionsFrame
-  if not PF:IsShown() then SlashCmdList.WINDFALL("prof") end
+  if not PF:IsShown() then WF_NS.dev.ToggleProfessions() end
   if PF.modeButton.text ~= "Levelling plan" then PF.modeButton.onOnClick(PF.modeButton) end
   ev2(S, "SKILL_LINES_CHANGED"); runTimers()
   PF.route.onOnClick(PF.route, "RightButton"); PF.route.onOnClick(PF.route, "LeftButton")
@@ -544,7 +544,7 @@ print(rt.eval(r'''(function()
     [2541] = { name = "Coyote Steak", item = 2684, rd = 1, reagents = { {2673, 1} } } } }
   ev(nil, "TRADE_SKILL_LIST_UPDATE"); runTimers()
   local PF2 = WindfallProfessionsFrame
-  if not PF2:IsShown() then SlashCmdList.WINDFALL("prof") end
+  if not PF2:IsShown() then WF_NS.dev.ToggleProfessions() end
   while PF2.profButton.text ~= "Cooking" do PF2.profButton.onOnClick(PF2.profButton) end
   PF2.route.onOnClick(PF2.route, "LeftButton")
   out[#out+1] = "cook: "..tostring(S.title2.text).." | now: "..tostring(S.now.text)
@@ -552,7 +552,7 @@ print(rt.eval(r'''(function()
   GetProfessionInfo = oldGPI; gatherProfs = { 182, 186 }
   -- forget needs shift, load brings it back
   local P = WindfallProfessionsFrame
-  if not P:IsShown() then SlashCmdList.WINDFALL("prof") end -- one page at a time: back to Professions
+  if not P:IsShown() then WF_NS.dev.ToggleProfessions() end -- one page at a time: back to Professions
   P.forget.onOnClick(P.forget)
   out[#out+1] = "load: plain click on Forget -> popup shown? "..tostring(forgetShown == true).." char="..tostring(P.charButton.text)
   shiftDown = true; P.forget.onOnClick(P.forget); shiftDown = false
@@ -580,9 +580,9 @@ print(rt.eval(r'''(function()
     out[#out+1] = "panel: "..label.." -> panel shown="..tostring(PN.shown).." page="..cur
   end
   out[#out+1] = "bar: rate='"..tostring(B.rate.text).."' time='"..tostring(B.time.text).."' fish dim="..tostring(B.fish.icon.desat).." sparkle dim="..tostring(B.sparkle.icon.desat)
-  if PN.shown then B.menu.onOnClick(B.menu) end
+  if PN.shown then WF_NS.dev.TogglePanel() end
   pn("closed")
-  B.menu.onOnClick(B.menu); pn("Windfall icon on the bar")
+  WF_NS.dev.TogglePanel(); pn("Windfall icon on the bar")
   WindfallFrame.zones.onOnClick(WindfallFrame.zones); pn("Zones button on the Farming tab")
   PN.Tabs[4].onOnClick(PN.Tabs[4]); pn("tab: Settings")
   PN.Tabs[2].onOnClick(PN.Tabs[2]); pn("tab: Recipes")
@@ -604,8 +604,8 @@ print(rt.eval(r'''(function()
   rows = {}; for _, r in ipairs(WindfallCharMenu.rows) do if r:IsShown() then rows[#rows+1] = r.text.text end end
   out[#out+1] = "header: two Hunties -> "..table.concat(rows, " || ").." | button="..tostring(H.char.text)
   WindfallCharMenu:Hide(); WindfallDB.chars["Huntie-Other Realm"] = nil
-  B.money.onOnClick(B.money, "LeftButton"); pn("gold per hour on the bar")
-  B.menu.onOnClick(B.menu); pn("Windfall icon again")
+  WF_NS.dev.OpenFarming(); pn("gold per hour on the bar")
+  WF_NS.dev.TogglePanel(); pn("Windfall icon again")
   -- at a vendor with the panel closed: it opens next to the vendor, and closes again after
   merchant = { 2320 }; MerchantFrame.shown = true; bags[2320] = 0
   ev2(nil, "MERCHANT_SHOW"); pn("vendor opens (route has thread to buy)")
@@ -620,8 +620,8 @@ print(rt.eval(r'''(function()
   ev(nil, "SKILL_LINES_CHANGED"); runTimers()
   local c = WindfallDB.chars["Jonjan-Realm"]
   out[#out+1] = "priest: listed at login -> "..tostring(c ~= nil).." professions: "..(c and ((c.professions.Enchanting and "Enchanting "..c.professions.Enchanting.skill.." unloaded="..tostring(c.professions.Enchanting.unloaded)) or "-") or "-")
-  if WindfallPanel.shown then WindfallBar.menu.onOnClick(WindfallBar.menu) end
-  WindfallBar.menu.onOnClick(WindfallBar.menu)
+  if WindfallPanel.shown then WF_NS.dev.TogglePanel() end
+  WF_NS.dev.TogglePanel()
   local H2 = WindfallPanel.header
   local S2 = WindfallShoppingFrame
   -- this test session has picked Huntie by hand earlier; pick the priest the same way
@@ -658,7 +658,7 @@ print(rt.eval(r'''(function()
   out[#out+1] = "zivv: Zivv Zniper saved -> "..tostring(zn ~= nil).." bags Golden Sansam="..tostring(zn and zn.bags and zn.bags[13464])
   -- from Zivv Zniper, look at Zivv Gg's Alchemy
   local PN, H = WindfallPanel, WindfallPanel.header
-  if not PN.shown then WindfallBar.menu.onOnClick(WindfallBar.menu) end
+  if not PN.shown then WF_NS.dev.TogglePanel() end
   PN.Tabs[2].onOnClick(PN.Tabs[2])
   H.char.onOnClick(H.char)
   local list = {}; for _, r in ipairs(WindfallCharMenu.rows) do if r:IsShown() then list[#list+1] = r.text.text end end
@@ -704,6 +704,57 @@ print(rt.eval(r'''(function()
   out[#out+1] = "      list: "..rows()
   native.onOnMouseDown(native, "LeftButton")
   out[#out+1] = "profwin: native tab -> page shown="..tostring(page:IsShown()).." game's page back="..tostring(overview:IsShown()).." its tab kept="..tostring(native:IsShown())
+  -- gathering and fishing in the same page
+  local function icons() local t = {} for _, b in ipairs(NP.header.icons) do if b:IsShown() then t[#t+1] = b.name..(b.ring.shown and "*" or "") end end return table.concat(t, ",") end
+  local function tabs() local t = {} for _, b in ipairs(NP.modeTabs) do if b:IsShown() then t[#t+1] = tostring(b.text)..(b.key == NP.mode and "*" or "") end end return table.concat(t, " | ") end
+  tab.onOnMouseUp(tab, "LeftButton")
+  out[#out+1] = "home: header for "..tostring(NP.header.char.text).." -> "..icons().." | tabs: "..tabs()
+  for _, b in ipairs(NP.header.icons) do if b:IsShown() and b.name == "Fishing" then b.onOnClick(b) end end
+  local S = NP.session
+  out[#out+1] = "home: Fishing -> "..icons().." | tabs: "..tabs().." | bar='"..tostring(NP.header.bar.text.text).."' title="..tostring(NP.titleText and NP.titleText.text)
+  out[#out+1] = "      session: "..tostring(S.rate.text).." | "..tostring(S.time.text).." | "..tostring(S.total.text).." | shown="..tostring(S:IsShown()).." craft list shown="..tostring(NP.listBox:IsShown())
+  for i = 1, 3 do local r = S.rows[i]; if r:IsShown() then out[#out+1] = "        "..tostring(r.name.text).." | "..tostring(r.each.text).." | "..tostring(r.value.text) end end
+  out[#out+1] = "      sparkle check: '"..tostring(S.sparkle.label.text).."' shown="..tostring(S.sparkle:IsShown())
+  NP.modeTabs[2].onOnClick(NP.modeTabs[2])
+  local Z = NP.zones
+  out[#out+1] = "home: Zones -> "..tostring(Z.title.text).." | shown="..tostring(Z:IsShown()).." session hidden="..tostring(not S:IsShown()).." | first: "..tostring(Z.rows[1].zone.text).." "..tostring(Z.rows[1].rate.text).." | hint="..tostring(Z.hint.text)
+  NP.modeTabs[3].onOnClick(NP.modeTabs[3])
+  local labels = {}; for _, c in ipairs(NP.checks) do labels[#labels+1] = (c.checked and "[x] " or "[ ] ")..c.label.text end
+  out[#out+1] = "home: Fishing tab -> shown="..tostring(NP.fishing:IsShown()).." key="..tostring(NP.keyButton.text).." getaway="..tostring(NP.fishing.getaway.text)
+  out[#out+1] = "      "..table.concat(labels, " / ")
+  for _, c in ipairs(NP.checks) do if c.row and c.row.key == "fishSound" then c.checked = false; c.onOnClick(c) end end
+  out[#out+1] = "home: untick louder splash -> fishSound="..tostring(WindfallDB.fishSound)
+  for _, c in ipairs(NP.checks) do if c.row and c.row.key == "fishSound" then c.checked = true; c.onOnClick(c) end end
+  local gear = NP.header.gear; gear.onOnClick(gear)
+  out[#out+1] = "home: gear -> shown="..tostring(NP.gearMenu:IsShown())
+  gear.onOnClick(gear)
+  -- back to a crafting profession: its tabs again
+  for _, b in ipairs(NP.header.icons) do if b:IsShown() and b.name == "Cooking" then b.onOnClick(b) end end
+  out[#out+1] = "home: Cooking -> "..icons().." | tabs: "..tabs().." | list shown="..tostring(NP.listBox:IsShown()).." gather hidden="..tostring(not NP.gpage:IsShown())
+  -- the bar's gold per hour opens the session for the character you are on
+  book.shown = true
+  WindfallBar.money.onOnClick(WindfallBar.money, "LeftButton")
+  out[#out+1] = "home: bar gold/hour (window open) -> char="..tostring(NP.header.char.text).." "..icons().." | tabs: "..tabs()
+  -- a character with nothing to gather gets Farming
+  local zn2 = WindfallDB.chars["Zivv Gg-Realm"]; local keep = zn2.gathering; zn2.gathering = {}
+  NP.header.char.onOnClick(NP.header.char)
+  for _, r in ipairs(WindfallCharMenu.rows) do if r:IsShown() and r.key == "Zivv Gg-Realm" then r.onOnClick(r) end end
+  out[#out+1] = "home: Zivv Gg without gathering -> "..icons()
+  zn2.gathering = keep
+  -- the Windfall icon with the window closed: the game opens it through a crafting profession
+  book.shown = false; page:Hide(); NP.active = false; book.selectedSkillLine = false
+  local opened; local oldOpen = C_TradeSkillUI.OpenTradeSkill; C_TradeSkillUI.OpenTradeSkill = function(line) opened = line end
+  local panelShown; local oldShow = ShowUIPanel; ShowUIPanel = function(f) panelShown = f end
+  WindfallBar.menu.onOnClick(WindfallBar.menu)
+  out[#out+1] = "home: bar icon, window closed, Zivv Zniper (no crafting) -> OpenTradeSkill="..tostring(opened).." ShowUIPanel="..tostring(panelShown == book).." wants="..tostring(NP.wantView)
+  book.shown = true; book.onOnShow(book); runTimers(); runTimers()
+  out[#out+1] = "      window shows -> Windfall page shown="..tostring(page:IsShown()).." char="..tostring(NP.header.char.text)
+  book.selectedSkillLine = 171; book.shown = false; page:Hide(); NP.active = false; opened = nil; panelShown = nil
+  SlashCmdList.WINDFALL("zones")
+  out[#out+1] = "home: /wf zones, last profession Alchemy -> OpenTradeSkill="..tostring(opened).." ShowUIPanel="..tostring(panelShown ~= nil).." wants="..tostring(NP.wantView)
+  book.shown = true; book.onOnShow(book); runTimers(); runTimers()
+  out[#out+1] = "      window shows -> tabs: "..tabs()
+  C_TradeSkillUI.OpenTradeSkill = oldOpen; ShowUIPanel = oldShow; book.selectedSkillLine = nil
   GetProfessionInfo = oldGPI3; playerSurname = nil; player = "Huntie"; class = "HUNTER"; containers = {}
   return table.concat(out, "\n")
 end)()''').replace("|cffffd700g|r","g").replace("|cffc7c7cfs|r","s").replace("|cffeda55fc|r","c"))

@@ -2,6 +2,17 @@
 
 All changes to Windfall, newest first. After an update, type `/reload` in game (or restart the game when the notes say so).
 
+## [0.2.41] - 2026-11-15
+
+- **Everything Windfall does is now in the game's profession window.** The Windfall tab's header shows every profession of the character you pick, and the tabs under the window change with it:
+  - **Crafting** (Tailoring, Alchemy…): **Recipes** and **Levelling**, as before.
+  - **Herbalism, Mining and Skinning:** **Session** shows gold per hour, time, total and what you have gathered with prices, with Start/Pause, Gathering/All loot, Reset and a sparkle switch for that kind of node. **Zones** ranks zones by gold per hour, with Clear history.
+  - **Fishing:** Session and Zones, plus **Fishing** with the fishing key, all its options and how many fish get away here.
+  - A character without a gathering profession gets **Farming** in its header for the same pages.
+  - The few general settings (node sparkles, interact back to default, show the bar) are under the gear at the top right.
+- **Opening it:** the Windfall icon on the bar, the key binding and `/wf` open the profession window on Windfall (or close it). Clicking the gold per hour on the bar opens the Session page. `/wf prof`, `/wf session`, `/wf zones` and `/wf settings` open those pages. Gathering and fishing skills are saved for every character too.
+- **Removed:** the separate Windfall window and the minimap button. The shopping list stays: it docks next to the auction house or a vendor when there is something to buy there, and *Shopping list* on the Levelling page opens it beside the profession window.
+
 ## [0.2.40] - 2026-11-15
 
 - **Cleaner Windfall page in the profession window:**

@@ -6,27 +6,28 @@ A World of Warcraft Forever addon for making and spending gold well: what your f
 
 ## Getting around
 
-- **The Windfall window** opens from the Windfall icon on the bar, the minimap button or `/wf`. It looks like the game's own windows, with tabs along the bottom: **Levelling**, **Recipes**, **Farming** and **Settings**.
-- **At the top** pick any of your characters and one of their professions (the icons); a skill bar shows where that profession is.
-- **The bar** stays on screen: your gold per hour and session time, a fish switch (fishing key on or off, right-click to choose the key), a flower switch (node sparkles on or off), and the Windfall icon. Drag it wherever you like.
-- **At the auction house or a vendor**, the window docks next to it on the Levelling tab when there is something on your list to buy there, and goes back to its own spot afterwards.
+- **Windfall lives in the game's profession window**, as a tab with the profession tabs on its right side. The Windfall icon on the bar, the key binding and `/wf` open the window on it.
+- **At the top** pick any of your characters and one of their professions (the icons: crafting, gathering and Fishing); a skill bar shows where that profession is. The gear holds the general settings.
+- **Tabs under the window** change with the profession: **Recipes** and **Levelling** for crafting; **Session** and **Zones** for Herbalism, Mining and Skinning (and **Farming** on a character that gathers nothing); Fishing adds a **Fishing** tab for the fishing key.
+- **The bar** stays on screen: your gold per hour and session time (click for the Session page), a fish switch (fishing key on or off, right-click to choose the key), a flower switch (node sparkles on or off), and the Windfall icon. Drag it wherever you like.
+- **The shopping list** docks next to the auction house or a vendor when there is something on it to buy there; *Shopping list* on the Levelling page opens it beside the profession window.
 
 ## Farming
 
-- **Two views:** *Gathering* counts only herbs, ore, skins and fish (mob loot does not pull your rate down). *All loot* counts everything you loot, plus coins. Switch on the Farming page or by right-clicking the gold per hour on the bar; nothing is lost when you switch.
+- **Two views:** *Gathering* counts only herbs, ore, skins and fish (mob loot does not pull your rate down). *All loot* counts everything you loot, plus coins. Switch on the Session page or by right-clicking the gold per hour on the bar; nothing is lost when you switch.
 - **Prices:** Auctionator's last scanned price, or the vendor price when that is higher or the item was never scanned.
 - **Calm numbers:** updated when you loot something or once a minute.
-- **Zones:** Reset saves the session per zone. The Zones button on the Farming tab ranks zones by gold per hour, so you can tell which spot is worth farming.
+- **Zones:** Reset saves the session per zone. The Zones tab ranks zones by gold per hour, so you can tell which spot is worth farming.
 
 ## Professions
 
-Every recipe a character knows, on every character you play, shown like the profession window: the list on the left (with how many you can make), the picked recipe on the right with its reagents, how many that character has and needs, what your other characters hold, the cost (the cheaper of the auction house and a vendor), what the result sells for after the 5% auction house cut, and the profit. The same view is in the game's own profession window: a Windfall tab sits with the profession tabs on its right side, and shows any character's professions in the window's layout (categories, search, reagents, Create), with a Levelling view for the route. Characters are listed by their full name as soon as you log in; their recipes are read when you open a profession window, or with Load. Each character's bags are saved as they change and its bank whenever you open it, so you can see any character's materials from any other.
+Every recipe a character knows, on every character you play, in the profession window's own layout: the list on the left (with how many you can make), the picked recipe on the right with its reagents, how many that character has and needs, what your other characters hold, the cost (the cheaper of the auction house and a vendor), what the result sells for after the 5% auction house cut, and the profit. Characters are listed by their full name as soon as you log in; their recipes are read when you open a profession window, or with Load. Each character's bags are saved as they change and its bank whenever you open it, so you can see any character's materials from any other.
 
 Levelling takes the cheapest way up from your skill. It mixes the recipes you know with the ones the trainer can teach you now and ranks them by what a skill point costs, using each recipe's real skill-up chance from the game's own data (a point every time while orange, less and less until grey). Sure points come first; low-chance crafts only when nothing better is left.
 
-The **Levelling** tab plays that forward for the picked profession, up to the next skill cap (**Plan to 150** to plan further): every step up to the target, the ranks to train on the way (or the book or quest for Cooking and First Aid, and a note when your level is too low), and all the materials with a spare for unlucky skill-ups. On the Levelling tab:
+The **Levelling** tab plays that forward for the picked profession, up to the next skill cap (the shopping list's **Plan to 150** plans further): every step up to the target, the ranks to train on the way (or the book or quest for Cooking and First Aid, and a note when your level is too low), and all the materials with a spare for unlucky skill-ups, in the shopping list:
 
-- **Now:** the step to do, with a **Craft** button. It moves on by itself as your skill goes up, when you learn a recipe and when you train a rank.
+- **The route:** every step with how many to craft; pick one to see its reagents and Create it. It moves on by itself as your skill goes up, when you learn a recipe and when you train a rank.
 - **At the auction house:** **Show** opens a material's page in the auction house with the amount you still need filled in; you press Buy Now there.
 - **At a vendor:** **Buy** buys what you still need of anything the vendor sells, and **Buy all here** buys all of it at once.
 
@@ -36,7 +37,7 @@ Trainer recipe data comes from **What's Training?** by Sveng (MIT licence) and s
 
 ## Node sparkles
 
-Switched on from the bar or the settings, the nearest herb, ore vein or fishing pool you can gather gets a sparkle and the game's gather icon. Quest objects, chests and NPCs get nothing. Each kind can be switched off on its own. The game only picks up nodes within about 15 yards.
+Switched on from the bar, the gear or a gathering profession's Session page, the nearest herb, ore vein or fishing pool you can gather gets a sparkle and the game's gather icon. Quest objects, chests and NPCs get nothing. Each kind can be switched off on its own. The game only picks up nodes within about 15 yards.
 
 When Windfall is done with the interact key (the line comes in, or sparkles are switched off), it puts it back to the game's defaults: 10 yards, in front of you. The rest of the time it leaves the interact settings alone, so other addons can set them as they like.
 
@@ -48,14 +49,14 @@ When Windfall is done with the interact key (the line comes in, or sparkles are 
 - **Louder splash:** sound effects to full and music and ambience to a quarter while the line is out.
 - **Also:** double right-click to cast, auto loot while fishing, switches off after 10 idle minutes, and a line telling you how many fish get away in the zone you are in.
 
-Every option is a checkbox on the Settings page.
+Every option is a checkbox on Fishing's **Fishing** tab.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `/wf` | Open or close the Windfall window |
-| `/wf settings`, `/wf zones`, `/wf prof` | Open a tab |
+| `/wf` | Open or close Windfall in the profession window |
+| `/wf prof`, `/wf session`, `/wf zones`, `/wf settings` | Open that page |
 | `/wf gather`, `/wf loot` | Switch view |
 | `/wf start`, `/wf pause` | Start or pause the clock |
 | `/wf reset` | Save the session to the zone history and start over (`/wf discard` throws it away) |
