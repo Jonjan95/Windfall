@@ -435,15 +435,6 @@ print(rt.eval(r'''(function()
   local saved = WindfallDB.recipeData or {}
   local n = 0; for _ in pairs(saved) do n = n + 1 end
   out[#out+1] = "plan: trainer recipes with reagents saved: "..n
-  -- shopping list for the first recipe row
-  for i = 1, 18 do local r = P.rows[i]; if r.entry and r.entry.recipe and r.entry.recipe.reagents[1] and not r.entry.kind then r.onOnClick(r); break end end
-  local S = WindfallShoppingFrame
-  local function shop(label)
-    out[#out+1] = "shop: "..label.." -> "..S.title2.text.." / "..S.crafts.text.." / "..S.sum.text
-    for i = 1, 3 do local r = S.rows[i]; if r:IsShown() then out[#out+1] = "      "..r.name.text.." | "..r.need.text.." | "..r.total.text end end
-  end
-  shop("opened")
-  bags[2318] = 40; S.onOnEvent(S, "BAG_UPDATE_DELAYED"); shop("after buying leather")
   -- route and auction house buying
   local P = WindfallProfessionsFrame
   out[#out+1] = "route: button '"..tostring(P.route.text).."' shown="..tostring(P.route:IsShown())
@@ -569,7 +560,10 @@ print(rt.eval(r'''(function()
   out[#out+1] = "load: click opened skill lines "..table.concat(openedLines, ",").." closed="..tostring(closedTrade).." timers waiting="..#timers
   ev(nil, "TRADE_SKILL_SHOW"); runTimers()
   out[#out+1] = "load: Leatherworking saved -> ["..tostring(P.charButton.text).."] ["..tostring(P.profButton.text).."] load button shown="..tostring(P.load:IsShown()).." '"..tostring(P.load.text).."'"
-  -- the bar and the panel
+  -- the bar and the panel (Huntie has Leatherworking and Cooking saved)
+  trade = { name = "Leatherworking", id = 165, skill = 120, max = 150, recipes = {
+    [3768] = { name = "Hillman's Shoulders", item = 4251, rd = 0, reagents = { {2318, 4}, {2320, 1} } } } }
+  ev(nil, "TRADE_SKILL_LIST_UPDATE"); runTimers()
   local B, PN = WindfallBar, WindfallPanel
   local function pn(label)
     local cur = "none"
@@ -582,8 +576,21 @@ print(rt.eval(r'''(function()
   if PN.shown then B.menu.onOnClick(B.menu) end
   pn("closed")
   B.menu.onOnClick(B.menu); pn("Windfall icon on the bar")
-  for _, b in ipairs(PN.nav) do if b.key == "zones" then b.onOnClick(b) end end; pn("menu: Zones")
-  for _, b in ipairs(PN.nav) do if b.key == "settings" then b.onOnClick(b) end end; pn("menu: Settings")
+  WindfallFrame.zones.onOnClick(WindfallFrame.zones); pn("Zones button on the Farming tab")
+  PN.Tabs[4].onOnClick(PN.Tabs[4]); pn("tab: Settings")
+  PN.Tabs[2].onOnClick(PN.Tabs[2]); pn("tab: Recipes")
+  PN.Tabs[1].onOnClick(PN.Tabs[1]); pn("tab: Levelling")
+  local H = PN.header
+  local names = {}; for _, b in ipairs(H.icons) do if b:IsShown() then names[#names+1] = b.name end end
+  out[#out+1] = "header: char="..tostring(H.char.text).." icons="..table.concat(names, ",").." bar='"..tostring(H.bar.text.text).."' route="..tostring(WindfallShoppingFrame.title2.text)
+  for _, b in ipairs(H.icons) do if b.name == "Leatherworking" then b.onOnClick(b) end end
+  out[#out+1] = "header: picked Leatherworking -> bar='"..tostring(H.bar.text.text).."' route="..tostring(WindfallShoppingFrame.title2.text).." target button="..tostring(WindfallShoppingFrame.target.text)
+  WindfallShoppingFrame.target.onOnClick(WindfallShoppingFrame.target)
+  out[#out+1] = "header: target clicked -> route="..tostring(WindfallShoppingFrame.title2.text).." target button="..tostring(WindfallShoppingFrame.target.text)
+  H.char.onOnClick(H.char)
+  local rows = {}; for _, r in ipairs(WindfallCharMenu.rows) do if r:IsShown() then rows[#rows+1] = r.text.text end end
+  out[#out+1] = "header: character menu -> "..table.concat(rows, " || ")
+  WindfallCharMenu:Hide()
   B.money.onOnClick(B.money, "LeftButton"); pn("gold per hour on the bar")
   B.menu.onOnClick(B.menu); pn("Windfall icon again")
   -- at a vendor with the panel closed: it opens next to the vendor, and closes again after

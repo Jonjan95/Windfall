@@ -6,24 +6,25 @@ A World of Warcraft Forever addon for making and spending gold well: what your f
 
 ## Getting around
 
+- **The Windfall window** opens from the Windfall icon on the bar, the minimap button or `/wf`. It looks like the game's own windows, with tabs along the bottom: **Levelling**, **Recipes**, **Farming** and **Settings**.
+- **At the top** pick any of your characters and one of their professions (the icons); a skill bar shows where that profession is.
 - **The bar** stays on screen: your gold per hour and session time, a fish switch (fishing key on or off, right-click to choose the key), a flower switch (node sparkles on or off), and the Windfall icon. Drag it wherever you like.
-- **The panel** opens from the Windfall icon on the bar, the minimap button or `/wf`. It has one page at a time, picked from the menu along the top: **Farming**, **Zones**, **Professions**, **Route** and **Settings**. It opens on the page you used last.
-- **At the auction house or a vendor**, the panel docks next to it on the Route page when there is something on your list to buy there, and goes back to its own spot afterwards.
+- **At the auction house or a vendor**, the window docks next to it on the Levelling tab when there is something on your list to buy there, and goes back to its own spot afterwards.
 
 ## Farming
 
 - **Two views:** *Gathering* counts only herbs, ore, skins and fish (mob loot does not pull your rate down). *All loot* counts everything you loot, plus coins. Switch on the Farming page or by right-clicking the gold per hour on the bar; nothing is lost when you switch.
 - **Prices:** Auctionator's last scanned price, or the vendor price when that is higher or the item was never scanned.
 - **Calm numbers:** updated when you loot something or once a minute.
-- **Zones:** Reset saves the session per zone. The Zones page ranks zones by gold per hour, so you can tell which spot is worth farming.
+- **Zones:** Reset saves the session per zone. The Zones button on the Farming tab ranks zones by gold per hour, so you can tell which spot is worth farming.
 
 ## Professions
 
 Every recipe a character knows, on every character you play: what the reagents cost (the cheaper of the auction house and a vendor), what the result sells for after the 5% auction house cut, and the profit. Recipes are saved when you open a profession window, or with the Load button.
 
-The **Levelling plan** lists the cheapest way up from your skill. It mixes the recipes you know with the ones the trainer can teach you now and ranks them by what a skill point costs, using each recipe's real skill-up chance from the game's own data (a point every time while orange, less and less until grey). Sure points come first; low-chance crafts only when nothing better is left.
+Levelling takes the cheapest way up from your skill. It mixes the recipes you know with the ones the trainer can teach you now and ranks them by what a skill point costs, using each recipe's real skill-up chance from the game's own data (a point every time while orange, less and less until grey). Sure points come first; low-chance crafts only when nothing better is left.
 
-**Route to 150** (right-click for another target) plays that forward: every step up to the target, the ranks to train on the way (or the book or quest for Cooking and First Aid, and a note when your level is too low), and all the materials with a spare for unlucky skill-ups. On the Route page:
+The **Levelling** tab plays that forward for the picked profession, up to the next skill cap (**Plan to 150** to plan further): every step up to the target, the ranks to train on the way (or the book or quest for Cooking and First Aid, and a note when your level is too low), and all the materials with a spare for unlucky skill-ups. On the Levelling tab:
 
 - **Now:** the step to do, with a **Craft** button. It moves on by itself as your skill goes up, when you learn a recipe and when you train a rank.
 - **At the auction house:** **Show** opens a material's page in the auction house with the amount you still need filled in; you press Buy Now there.
@@ -53,8 +54,8 @@ Every option is a checkbox on the Settings page.
 
 | Command | What it does |
 |---|---|
-| `/wf` | Open or close the panel |
-| `/wf settings`, `/wf zones`, `/wf prof` | Open a page |
+| `/wf` | Open or close the Windfall window |
+| `/wf settings`, `/wf zones`, `/wf prof` | Open a tab |
 | `/wf gather`, `/wf loot` | Switch view |
 | `/wf start`, `/wf pause` | Start or pause the clock |
 | `/wf reset` | Save the session to the zone history and start over (`/wf discard` throws it away) |
@@ -62,7 +63,7 @@ Every option is a checkbox on the Settings page.
 | `/wf fishkey` | Choose the fishing key |
 | `/wf sparkle` | Node sparkles on or off |
 
-Key bindings for the fishing switch, node sparkles and the panel are under Options > Keybindings > AddOns > Windfall.
+Key bindings for the fishing switch, node sparkles and the window are under Options > Keybindings > AddOns > Windfall.
 
 ## Development
 

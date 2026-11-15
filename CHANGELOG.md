@@ -2,6 +2,15 @@
 
 All changes to Windfall, newest first. After an update, type `/reload` in game (or restart the game when the notes say so).
 
+## [0.2.35] - 2026-11-15
+
+**A real WoW window, with professions first.**
+
+- **The Windfall window** now looks like the game's own windows: portrait, title, close button and tabs along the bottom, like the Character window. The portrait shows the profession you are looking at.
+- **Pick any character and profession** at the top: the character button lists everyone you have saved with their professions, the icons next to it switch profession, and a skill bar shows where you are.
+- **Tabs:** *Levelling* (the route for the picked profession, opening straight on it, with *Plan to 150* to plan further), *Recipes* (cost, sale value and profit), *Farming* (gold per hour, with your zones behind the Zones button) and *Settings*.
+- **Less to find your way through:** the cycle buttons, the separate plan view and the shopping list from clicking a recipe are gone; the Levelling tab does all of it. Shift-click a character in the character list to forget it.
+
 ## [0.2.34] - 2026-11-15
 
 **One bar and one panel instead of many windows.**

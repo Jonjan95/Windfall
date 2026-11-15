@@ -26,8 +26,9 @@ local historyFrame  -- zone history window, built on first use
 local Refresh, RefreshHistory, ToggleHistory
 local ToggleSettings, RefreshSettings
 local ResetInteract
-local ToggleProfessions, RefreshProfessions
+local ToggleProfessions, RefreshProfessions, RefreshHeader
 local NewPage, TogglePanel, DockPanel, UndockPanel, PageOpeners
+local PanelHeader, SetPanelHeaderRefresh, SetPanelPortrait, CurrentSelection
 local bar, BuildBar, UpdateBar, UpdateBarIcons
 local FISH_ICON, fishingNow, UpdateFishIcon, StartKeyCapture, ReleaseCVars, FishingSkill, OnLureCastStart, OnLureCastSucceeded, OnLureCastEnded
 local UpdateAutoLoot, SetFishing, SetFishKey, OnMainHandChanged, OnCombatEnded, OnChannelStart, OnChannelStop, InitFishing
@@ -947,7 +948,7 @@ end
 
 BINDING_HEADER_WINDFALL = "Windfall"
 BINDING_NAME_WINDFALL_FISHTOGGLE = "Fishing key on / off"
-BINDING_NAME_WINDFALL_WINDOW = "Open or close the panel"
+BINDING_NAME_WINDFALL_WINDOW = "Open or close the Windfall window"
 BINDING_NAME_WINDFALL_SPARKLE = "Node sparkles on / off"
 
 end
@@ -1244,24 +1245,25 @@ end
 
 -- ---------------------------------------------------------------- panel ----
 
--- One window for everything: a page menu along the top (Farming, Zones,
--- Professions, Route, Settings) and one page shown at a time. Each page is
--- built by its own section as before; showing or hiding a page shows the
--- panel on that page, so the rest of Windfall needs no changes.
+-- The Windfall window: a standard WoW panel (portrait, title, close button,
+-- inset) with tabs along the bottom, like the Character window. Levelling a
+-- profession is the main tab. Each page is built by its own section; showing
+-- or hiding a page shows the window on that page, so the rest of Windfall
+-- needs no changes.
 do
-local panel, current
-local pages, byKey = {}, {}
-local docked, placed, openedForDock = false, false, false
+local panel, current, inset, headerRefresh, portrait
+local pages = {}
 local switching = false
-local HEADER = 24       -- the panel's title and menu sit above each page's own layout
-local MIN_WIDTH = 340
-local NAV = {
+local docked, placed, openedForDock = false, false, false
+local W, H = 660, 560
+local INNER_W = W - 26
+local TABS = {
+    { key = "route", label = "Levelling" },
+    { key = "professions", label = "Recipes" },
     { key = "farming", label = "Farming" },
-    { key = "zones", label = "Zones" },
-    { key = "professions", label = "Professions" },
-    { key = "route", label = "Route" },
     { key = "settings", label = "Settings" },
 }
+local TAB_OF = { zones = "farming" } -- pages shown under another page's tab
 PageOpeners = {}
 
 -- The plain frame methods, for pages whose Show and Hide are replaced below.
@@ -1273,9 +1275,17 @@ local function Method(name)
 end
 local rawShow, rawHide, rawIsShown = Method("Show"), Method("Hide"), Method("IsShown")
 
-local function Resize()
-    if not (panel and current) then return end
-    panel:SetSize(math.max(current:GetWidth() or MIN_WIDTH, MIN_WIDTH), (current:GetHeight() or 200) + HEADER)
+local function HasTemplate(t)
+    if C_XMLUtil and C_XMLUtil.GetTemplateInfo then
+        local ok, info = pcall(C_XMLUtil.GetTemplateInfo, t)
+        return ok and info ~= nil
+    end
+    return true -- can't tell: the parts used are checked below
+end
+
+local function Part(obj, key)
+    local v = obj and obj[key]
+    if type(v) == "table" then return v end
 end
 
 local function PlacePanel()
@@ -1284,14 +1294,34 @@ local function PlacePanel()
     if pos then
         panel:SetPoint(pos[1], UIParent, pos[2], pos[3], pos[4])
     else
-        panel:SetPoint("CENTER", UIParent, "CENTER", 0, 60)
+        panel:SetPoint("CENTER", UIParent, "CENTER", 0, 40)
+    end
+end
+
+local function SelectTab(key)
+    key = TAB_OF[key] or key
+    for i, tab in ipairs(TABS) do
+        if tab.key == key then
+            if not (PanelTemplates_SetTab and pcall(PanelTemplates_SetTab, panel, i)) then
+                for j, b in ipairs(panel.Tabs) do
+                    local fs = b:GetFontString()
+                    if fs then
+                        if j == i then fs:SetTextColor(1, 1, 1) else fs:SetTextColor(1, 0.82, 0) end
+                    end
+                end
+            end
+        end
     end
 end
 
 local function BuildPanel()
-    local f = CreateFrame("Frame", "WindfallPanel", UIParent, "BackdropTemplate")
-    f:SetSize(MIN_WIDTH, 200)
+    local f = CreateFrame("Frame", "WindfallPanel", UIParent,
+        HasTemplate("ButtonFrameTemplate") and "ButtonFrameTemplate" or nil)
+    local native = Part(f, "Inset") ~= nil
+        and (Part(f, "CloseButton") or Part(f, "TitleText") or Part(f, "TitleContainer")) ~= nil
+    f:SetSize(W, H)
     f:SetFrameStrata("HIGH")
+    if f.SetToplevel then f:SetToplevel(true) end
     f:SetClampedToScreen(true)
     f:SetMovable(true)
     f:EnableMouse(true)
@@ -1304,41 +1334,98 @@ local function BuildPanel()
             db.panelPos = { point, relPoint, x, y }
         end
     end)
-    f:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        edgeSize = 12,
-        insets = { left = 3, right = 3, top = 3, bottom = 3 },
-    })
-    f:SetBackdropColor(0, 0, 0, 0.9)
-    f:SetBackdropBorderColor(0.4, 0.7, 0.3, 1)
 
-    f.title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    f.title:SetPoint("TOPLEFT", 12, -9)
-    local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
-    close:SetPoint("TOPRIGHT", 1, 1)
-    close:SetScript("OnClick", function() f:Hide() end)
-
-    -- The page menu.
-    f.nav = {}
-    local x = 10
-    for _, item in ipairs(NAV) do
-        local b = CreateFrame("Button", nil, f)
-        b:SetHeight(16)
-        b.text = b:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        b.text:SetPoint("LEFT")
-        b.text:SetText(item.label)
-        b:SetWidth((b.text:GetStringWidth() or 50) + 4)
-        b:SetPoint("TOPLEFT", x, -28)
-        x = x + (b:GetWidth() or 54) + 10
-        b:SetFrameLevel((f:GetFrameLevel() or 1) + 20)
-        b:SetScript("OnClick", function()
-            local open = PageOpeners[item.key]
-            if open then open() end
-        end)
-        b.key = item.key
-        f.nav[#f.nav + 1] = b
+    if not native then
+        -- Without the Blizzard art: a dark box with a close button.
+        local bg = CreateFrame("Frame", nil, f, "BackdropTemplate")
+        bg:SetAllPoints()
+        bg:SetFrameLevel(math.max(0, (f:GetFrameLevel() or 1) - 1))
+        bg:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8x8",
+            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+            edgeSize = 12,
+            insets = { left = 3, right = 3, top = 3, bottom = 3 },
+        })
+        bg:SetBackdropColor(0.05, 0.05, 0.07, 0.95)
+        local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
+        close:SetPoint("TOPRIGHT", -2, -2)
+        close:SetScript("OnClick", function() f:Hide() end)
     end
+
+    -- Title.
+    if Part(f, "TitleText") then
+        f.TitleText:SetText("Windfall")
+    elseif Part(Part(f, "TitleContainer"), "TitleText") then
+        f.TitleContainer.TitleText:SetText("Windfall")
+    elseif native and type(f.SetTitle) == "function" then
+        f:SetTitle("Windfall")
+    else
+        local t = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        t:SetPoint("TOP", 0, -8)
+        t:SetText("Windfall")
+    end
+    portrait = Part(f, "portrait") or Part(f, "Portrait") or Part(Part(f, "PortraitContainer"), "portrait")
+
+    -- Content area, and the strip above it for the character and profession.
+    inset = Part(f, "Inset")
+    if inset then
+        inset:ClearAllPoints()
+        inset:SetPoint("TOPLEFT", 4, -60)
+        inset:SetPoint("BOTTOMRIGHT", -6, 6)
+    else
+        inset = CreateFrame("Frame", nil, f)
+        inset:SetPoint("TOPLEFT", 8, -60)
+        inset:SetPoint("BOTTOMRIGHT", -8, 8)
+    end
+    f.header = CreateFrame("Frame", nil, f)
+    f.header:SetPoint("TOPLEFT", 62, -24)
+    f.header:SetPoint("BOTTOMRIGHT", f, "TOPRIGHT", -10, -58)
+
+    -- Tabs along the bottom.
+    local tabTemplate = (HasTemplate("PanelTabButtonTemplate") and "PanelTabButtonTemplate")
+        or (HasTemplate("CharacterFrameTabButtonTemplate") and "CharacterFrameTabButtonTemplate") or nil
+    f.Tabs = {}
+    for i, tab in ipairs(TABS) do
+        local b = CreateFrame("Button", "WindfallPanelTab" .. i, f, tabTemplate)
+        b:SetID(i)
+        local art = Part(b, "Left") or Part(b, "LeftActive") or Part(b, "LeftDisabled")
+        if not art then
+            b:SetSize(110, 26)
+            local bg = b:CreateTexture(nil, "BACKGROUND")
+            bg:SetAllPoints()
+            bg:SetColorTexture(0.12, 0.1, 0.06, 0.95)
+            local hl = b:CreateTexture(nil, "HIGHLIGHT")
+            hl:SetAllPoints()
+            hl:SetColorTexture(1, 0.82, 0, 0.12)
+            if not b:GetFontString() then
+                local fs = b:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                fs:SetPoint("CENTER")
+                b:SetFontString(fs)
+            end
+        end
+        b:SetText(tab.label)
+        if art and PanelTemplates_TabResize then pcall(PanelTemplates_TabResize, b, 0) end
+        if i == 1 then
+            b:SetPoint("TOPLEFT", f, "BOTTOMLEFT", 12, art and 2 or -2)
+        else
+            b:SetPoint("TOPLEFT", f.Tabs[i - 1], "TOPRIGHT", (not art or Part(b, "LeftActive")) and 3 or -15, 0)
+        end
+        b:SetScript("OnClick", function()
+            local open = PageOpeners[tab.key]
+            if open then open() end
+            if SOUNDKIT and SOUNDKIT.IG_CHARACTER_INFO_TAB then PlaySound(SOUNDKIT.IG_CHARACTER_INFO_TAB) end
+        end)
+        f.Tabs[i] = b
+    end
+    f.numTabs = #TABS
+    if PanelTemplates_SetNumTabs then pcall(PanelTemplates_SetNumTabs, f, #TABS) end
+
+    f:SetScript("OnShow", function()
+        if SOUNDKIT and SOUNDKIT.IG_CHARACTER_INFO_OPEN then PlaySound(SOUNDKIT.IG_CHARACTER_INFO_OPEN) end
+    end)
+    f:SetScript("OnHide", function()
+        if SOUNDKIT and SOUNDKIT.IG_CHARACTER_INFO_CLOSE then PlaySound(SOUNDKIT.IG_CHARACTER_INFO_CLOSE) end
+    end)
     if UISpecialFrames then table.insert(UISpecialFrames, "WindfallPanel") end -- Escape closes it
     f:Hide()
     return f
@@ -1354,33 +1441,28 @@ local function Select(page)
     current = page
     rawShow(page)
     page:ClearAllPoints()
-    page:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, -HEADER)
-    panel.title:SetText("|cff7fd36bWindfall|r")
-    for _, b in ipairs(panel.nav) do
-        b.text:SetTextColor(b.key == page.pageKey and 1 or 0.7, b.key == page.pageKey and 0.82 or 0.7,
-            b.key == page.pageKey and 0 or 0.7)
-    end
+    page:SetPoint("TOPLEFT", inset, "TOPLEFT", 4, page.pageOffset or 22)
+    SelectTab(page.pageKey)
+    if headerRefresh then headerRefresh(page.pageKey) end
     if not docked and not placed then
         PlacePanel()
         placed = true
     end
-    Resize()
     rawShow(panel)
 end
 
--- A page: a plain frame inside the panel. Its Show, Hide, SetShown and
--- IsShown work on the panel, so code written for separate windows still works.
+-- A page: a plain frame inside the window. Its Show, Hide, SetShown and
+-- IsShown work on the window, so code written for separate windows still works.
 function NewPage(name, label, width, key)
     panel = panel or BuildPanel()
-    local f = CreateFrame("Frame", name, panel)
-    f:SetSize(math.max(width, MIN_WIDTH), 200)
+    local f = CreateFrame("Frame", name, inset)
+    f:SetSize(INNER_W, 200)
     f.pageLabel, f.pageKey = label, key
     -- Pages used to have a title of their own; some still set it.
     f.title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     f.title:Hide()
     rawHide(f)
     pages[f] = true
-    byKey[key] = f
     f.Show = function(self) Select(self) end
     f.Hide = function(self)
         rawHide(self)
@@ -1388,19 +1470,37 @@ function NewPage(name, label, width, key)
     end
     f.SetShown = function(self, show) if show then self:Show() else self:Hide() end end
     f.IsShown = function(self) return current == self and rawIsShown(panel) and true or false end
-    f:HookScript("OnSizeChanged", function(self) if current == self then Resize() end end)
     return f
 end
 
--- Opens the panel on the page last shown (the farming page the first time),
--- or closes it.
+-- The strip above the pages, for the profession code to fill.
+function PanelHeader()
+    panel = panel or BuildPanel()
+    return panel.header, panel
+end
+
+function SetPanelHeaderRefresh(fn)
+    headerRefresh = fn
+end
+
+function SetPanelPortrait(texture)
+    local t = portrait
+    if not t then return end
+    if SetPortraitToTexture then
+        pcall(SetPortraitToTexture, t, texture)
+    else
+        t:SetTexture(texture)
+    end
+end
+
+-- Opens the window on the page last shown (Levelling the first time), or closes it.
 function TogglePanel()
     panel = panel or BuildPanel()
     if rawIsShown(panel) then
         rawHide(panel)
         return
     end
-    local key = current and current.pageKey or "farming"
+    local key = current and current.pageKey or "route"
     local open = PageOpeners[key]
     if open then open() elseif current then Select(current) end
 end
@@ -2093,6 +2193,9 @@ local function BuildSettingsFrame()
     f.profs:SetPoint("LEFT", f.history, "RIGHT", 6, 0)
     f.profs:SetText("Professions")
     f.profs:SetScript("OnClick", function() ToggleProfessions() end)
+    -- The tabs at the bottom do this now.
+    f.history:Hide()
+    f.profs:Hide()
 
     f:SetHeight(-y + 44)
     return f
@@ -2585,8 +2688,9 @@ local function RecipeTooltip(row)
 end
 
 local function BuildProfessionsFrame()
-    local f = MakeWindow("WindfallProfessionsFrame", "Professions", PROF_WIDTH, "professions")
+    local f = MakeWindow("WindfallProfessionsFrame", "Recipes", PROF_WIDTH, "professions")
     f:SetHeight(84 + PROF_ROWS * ROW_H + 40)
+    f.pageOffset = 52 -- the character and profession are picked in the window's header
 
     f.charButton = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
     f.charButton:SetSize(150, 20)
@@ -2655,10 +2759,7 @@ local function BuildProfessionsFrame()
         row:SetSize(PROF_WIDTH - 16, ROW_H)
         row:SetScript("OnEnter", RecipeTooltip)
         row:SetScript("OnLeave", function() GameTooltip:Hide() end)
-        row:SetScript("OnClick", function(self)
-            local e = self.entry
-            if e and e.recipe and e.recipe.reagents[1] then ShowShoppingList(e.recipe) end
-        end)
+
         Column(row, "GameFontHighlightSmall")
         Place(row, y)
         f.rows[i] = row
@@ -2731,6 +2832,8 @@ local function BuildProfessionsFrame()
     f.load:SetScript("OnClick", function() LoadProfessions() end)
     -- Above the recipe rows, which cover the middle of the window.
     f.load:SetFrameLevel((f:GetFrameLevel() or 1) + 10)
+    -- The window's header picks the character and profession now.
+    for _, old in ipairs({ f.charButton, f.profButton, f.modeButton, f.skill, f.route, f.forget }) do old:Hide() end
     return f
 end
 
@@ -2782,24 +2885,25 @@ function RefreshProfessions()
         f.route:Hide()
         return
     end
-    f.forget:Show()
     -- A profession of this character still to load: a small Load button.
     local pending = UnsavedProfessions()[1]
     f.load:ClearAllPoints()
-    f.load:SetPoint("BOTTOMRIGHT", -242, 10)
-    f.load:SetSize(110, 20)
+    f.load:SetPoint("BOTTOMRIGHT", -10, 10)
+    f.load:SetSize(150, 20)
     f.load:SetText(pending and ("Load " .. pending.name) or "")
     f.load:SetShown(pending ~= nil)
-    f.hint:SetWidth(PROF_WIDTH - (pending and 370 or 250))
+    f.hint:SetWidth(PROF_WIDTH - (pending and 180 or 30))
     if profView.target and profView.target <= (prof.skill or 1) then profView.target = nil end
     f.route:SetText("Route to " .. (profView.target or RouteTarget(prof.skill or 1)))
-    f.route:SetShown(profView.mode == "plan")
+    f.route:Hide()
     f.charButton:SetText(ClassColored(char, profView.char))
     f.profButton:SetText(profView.prof)
     f.skill:SetText(string.format("Skill %d / %d", prof.skill or 0, prof.max or 0))
 
     SyncLearned(prof, profView.char)
+    profView.mode = "profit" -- the levelling plan lives on the Levelling tab now
     profList = BuildProfList(prof, char)
+    if RefreshHeader then RefreshHeader() end
     profView.offset = math.max(0, math.min(profView.offset, #profList - PROF_ROWS))
     for i, row in ipairs(f.rows) do
         local e = profList[i + profView.offset]
@@ -2848,7 +2952,7 @@ function RefreshProfessions()
 
     local age = math.floor((time() - (prof.saved or time())) / 86400)
     local hint = (age >= 1 and string.format("Saved %d day%s ago. ", age, age == 1 and "" or "s") or "")
-        .. (profView.mode == "plan" and "Cheapest per skill point first. Click a recipe for a shopping list. " or "")
+
         .. "* = a reagent has no price."
         .. (#profList > PROF_ROWS and " Scroll for more." or "")
     f.hint:SetText(hint)
@@ -2872,6 +2976,232 @@ end
 PageOpeners.professions = function()
     if not (profFrame and profFrame:IsShown()) then ToggleProfessions() end
 end
+
+-- The window's header: which character, which profession, and its skill.
+local PROFESSION_ICONS = {
+    [165] = "Interface\\Icons\\Trade_LeatherWorking", [197] = "Interface\\Icons\\Trade_Tailoring",
+    [171] = "Interface\\Icons\\Trade_Alchemy", [164] = "Interface\\Icons\\Trade_BlackSmithing",
+    [333] = "Interface\\Icons\\Trade_Engraving", [202] = "Interface\\Icons\\Trade_Engineering",
+    [185] = "Interface\\Icons\\INV_Misc_Food_15", [129] = "Interface\\Icons\\Spell_Holy_SealOfSacrifice",
+}
+local MAX_PROF_ICONS = 6
+local header, headerPanel, charMenu
+
+local function ProfessionIcon(prof)
+    return PROFESSION_ICONS[prof and prof.line] or "Interface\\Icons\\INV_Misc_QuestionMark"
+end
+
+function CurrentSelection()
+    local char, prof = CurrentProfession()
+    return char, prof, profView
+end
+
+-- Picks a character and profession and shows it on the open page.
+local function Choose(charKey, profName)
+    profView.char, profView.prof, profView.offset, profView.target = charKey, profName, 0, nil
+    CurrentProfession()
+    if headerPanel and headerPanel:IsShown() then
+        if WindfallShoppingFrame and WindfallShoppingFrame:IsShown() then
+            PageOpeners.route()
+        else
+            RefreshProfessions()
+            RefreshHeader()
+        end
+    end
+end
+
+local function ProfessionSummary(char)
+    local parts = {}
+    for _, name in ipairs(SortedKeys(char.professions)) do
+        parts[#parts + 1] = string.format("%s %d", name, char.professions[name].skill or 0)
+    end
+    return table.concat(parts, ", ")
+end
+
+local function ToggleCharMenu(anchor)
+    if charMenu and charMenu:IsShown() then charMenu:Hide() return end
+    if not charMenu then
+        charMenu = CreateFrame("Frame", "WindfallCharMenu", anchor, "BackdropTemplate")
+        charMenu:SetFrameStrata("DIALOG")
+        charMenu:SetBackdrop({
+            bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+            edgeSize = 14,
+            insets = { left = 3, right = 3, top = 3, bottom = 3 },
+        })
+        charMenu:SetBackdropColor(0.05, 0.05, 0.07, 0.95)
+        charMenu.rows = {}
+        if UISpecialFrames then table.insert(UISpecialFrames, "WindfallCharMenu") end
+    end
+    charMenu:ClearAllPoints()
+    charMenu:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -2)
+    -- This character first, then the others.
+    local keys = SortedKeys(db.chars)
+    table.sort(keys, function(x, y)
+        if (x == CharacterKey()) ~= (y == CharacterKey()) then return x == CharacterKey() end
+        return x < y
+    end)
+    for i, key in ipairs(keys) do
+        local row = charMenu.rows[i]
+        if not row then
+            row = CreateFrame("Button", nil, charMenu)
+            row:SetSize(330, 18)
+            row:SetPoint("TOPLEFT", 8, -8 - (i - 1) * 18)
+            row:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
+            row.text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            row.text:SetPoint("LEFT", 4, 0)
+            row.text:SetWidth(322)
+            row.text:SetJustifyH("LEFT")
+            row.text:SetWordWrap(false)
+            row:SetScript("OnClick", function(self)
+                if IsShiftKeyDown and IsShiftKeyDown() then
+                    if StaticPopup_Show then StaticPopup_Show("WINDFALL_FORGET_CHARACTER", ShortName(self.key), nil, self.key) end
+                    return
+                end
+                charMenu:Hide()
+                local char = db.chars[self.key]
+                local current = (self.key == profView.char) and profView.prof
+                Choose(self.key, (char and char.professions[current or ""]) and current or SortedKeys(char and char.professions)[1])
+            end)
+            row:SetScript("OnEnter", function(self)
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:AddLine(ShortName(self.key))
+                GameTooltip:AddLine("Shift-click: forget this character in Windfall.", 0.6, 0.6, 0.6, true)
+                GameTooltip:Show()
+            end)
+            row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            charMenu.rows[i] = row
+        end
+        local char = db.chars[key]
+        row.key = key
+        row.text:SetText(ClassColored(char, key) .. "   |cff999999" .. ProfessionSummary(char) .. "|r")
+        row:Show()
+    end
+    for i = #keys + 1, #charMenu.rows do charMenu.rows[i]:Hide() end
+    charMenu:SetSize(346, 16 + math.max(1, #keys) * 18)
+    charMenu:Show()
+end
+
+if StaticPopupDialogs then
+    StaticPopupDialogs["WINDFALL_FORGET_CHARACTER"] = {
+        text = "Forget %s in Windfall? Opening their profession windows brings them back.",
+        button1 = YES or "Yes",
+        button2 = NO or "No",
+        OnAccept = function(_, key)
+            if db.chars then db.chars[key] = nil end
+            if charMenu then charMenu:Hide() end
+            if profView.char == key then profView.char, profView.prof = nil, nil end
+            Choose(profView.char, profView.prof)
+            RefreshHeader()
+        end,
+        timeout = 0,
+        whileDead = true,
+        hideOnEscape = true,
+    }
+end
+
+local function BuildHeader()
+    header, headerPanel = PanelHeader()
+    -- Character picker.
+    header.char = CreateFrame("Button", nil, header, "UIPanelButtonTemplate")
+    header.char:SetSize(150, 22)
+    header.char:SetPoint("LEFT", 0, 0)
+    header.char:SetScript("OnClick", function(self) ToggleCharMenu(self) end)
+    header.char:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:AddLine("Character")
+        GameTooltip:AddLine("Pick any of your characters to see their professions.", 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    header.char:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    -- Profession icons for that character.
+    header.icons = {}
+    for i = 1, MAX_PROF_ICONS do
+        local b = CreateFrame("Button", nil, header)
+        b:SetSize(28, 28)
+        b:SetPoint("LEFT", header.char, "RIGHT", 8 + (i - 1) * 32, 0)
+        b.icon = b:CreateTexture(nil, "ARTWORK")
+        b.icon:SetAllPoints()
+        b.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+        b.ring = b:CreateTexture(nil, "OVERLAY")
+        b.ring:SetPoint("TOPLEFT", -6, 6)
+        b.ring:SetPoint("BOTTOMRIGHT", 6, -6)
+        b.ring:SetTexture("Interface\\Buttons\\CheckButtonHilight")
+        b.ring:SetBlendMode("ADD")
+        b:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+        b:SetScript("OnClick", function(self) Choose(profView.char, self.name) end)
+        b:SetScript("OnEnter", function(self)
+            local char = db.chars and db.chars[profView.char]
+            local prof = char and char.professions[self.name]
+            GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+            GameTooltip:AddLine(self.name)
+            if prof then GameTooltip:AddLine(string.format("Skill %d / %d", prof.skill or 0, prof.max or 0), 1, 1, 1) end
+            GameTooltip:Show()
+        end)
+        b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        header.icons[i] = b
+    end
+    -- Skill bar.
+    header.bar = CreateFrame("StatusBar", nil, header)
+    header.bar:SetSize(190, 16)
+    header.bar:SetPoint("RIGHT", -2, 0)
+    header.bar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
+    header.bar:SetStatusBarColor(0.1, 0.5, 0.15)
+    header.bar.bg = header.bar:CreateTexture(nil, "BACKGROUND")
+    header.bar.bg:SetAllPoints()
+    header.bar.bg:SetColorTexture(0, 0, 0, 0.6)
+    header.bar.text = header.bar:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    header.bar.text:SetPoint("CENTER")
+    -- On the farming and settings tabs: a line of text instead.
+    header.info = header:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    header.info:SetPoint("LEFT", 0, 0)
+end
+
+function RefreshHeader(key)
+    if not header then BuildHeader() end
+    key = key or header.key
+    header.key = key
+    local profPage = key == "route" or key == "professions"
+    header.char:SetShown(profPage)
+    header.bar:SetShown(profPage)
+    header.info:SetShown(not profPage)
+    for _, b in ipairs(header.icons) do b:Hide() end
+    if not profPage then
+        if key == "settings" then
+            header.info:SetText("Settings")
+            SetPanelPortrait("Interface\\Icons\\INV_Misc_Gear_01")
+        else
+            header.info:SetText((frame and frame.rate:GetText() or "") .. "   " .. (frame and frame.total:GetText() or ""))
+            SetPanelPortrait("Interface\\AddOns\\Windfall\\Media\\icon")
+        end
+        return
+    end
+    local char, prof = CurrentProfession()
+    if not char then
+        header.char:SetText("No characters")
+        header.bar:Hide()
+        SetPanelPortrait("Interface\\AddOns\\Windfall\\Media\\icon")
+        return
+    end
+    header.char:SetText(ClassColored(char, profView.char))
+    for i, name in ipairs(SortedKeys(char.professions)) do
+        local b = header.icons[i]
+        if b then
+            b.name = name
+            b.icon:SetTexture(ProfessionIcon(char.professions[name]))
+            b.ring:SetShown(name == profView.prof)
+            b:Show()
+        end
+    end
+    if prof then
+        header.bar:SetMinMaxValues(0, math.max(prof.max or 1, 1))
+        header.bar:SetValue(prof.skill or 0)
+        header.bar.text:SetText(string.format("%s %d / %d", profView.prof, prof.skill or 0, prof.max or 0))
+        SetPanelPortrait(ProfessionIcon(prof))
+    end
+end
+
+SetPanelHeaderRefresh(function(key) RefreshHeader(key) end)
 end
 
 -- Route and shopping list, in a block of their own (the 200-locals limit).
@@ -3306,6 +3636,8 @@ function RefreshShoppingList()
     if not (shopFrame and shopFrame:IsShown()) then return end
     local f = shopFrame
     f.title2:SetText(shop.title)
+    f.target:SetShown(not shop.single and shop.route ~= nil)
+    if shop.route then f.target:SetText("Plan to " .. shop.route.target) end
     f.crafts:SetShown(shop.single)
     f.minus:SetShown(shop.single)
     f.plus:SetShown(shop.single)
@@ -3419,6 +3751,29 @@ local function BuildShoppingFrame()
     f.crafts:SetPoint("TOPRIGHT", -46, -35)
     f.minus = Step("-", -1, -108)
 
+    -- How far the route goes: the next skill cap, or click for further.
+    f.target = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    f.target:SetSize(110, 20)
+    f.target:SetPoint("TOPRIGHT", -12, -30)
+    f.target:SetScript("OnClick", function()
+        local _, prof, view = CurrentSelection()
+        if not prof then return end
+        local skill, now = prof.skill or 1, view.target or RouteTarget(prof.skill or 1)
+        local nextTarget
+        for _, t in ipairs(ROUTE_TARGETS) do
+            if t > now and t > skill then nextTarget = t break end
+        end
+        view.target = nextTarget or RouteTarget(skill)
+        PageOpeners.route()
+    end)
+    f.target:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:AddLine("How far to plan")
+        GameTooltip:AddLine("Click for the next target: 75, 150, 225 or 300.", 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    f.target:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
     f.now = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     f.now:SetPoint("TOPLEFT", 14, -60)
     f.now:SetWidth(SHOP_WIDTH - 160)
@@ -3501,10 +3856,23 @@ local function OpenShopping()
     RefreshShoppingList()
 end
 
+-- The Levelling tab: the route for the character and profession picked in
+-- the header, up to the next skill cap (or the target picked on the page).
 PageOpeners.route = function()
-    shopFrame = shopFrame or BuildShoppingFrame()
-    shopFrame:Show()
-    RefreshShoppingList()
+    local _, prof, view = CurrentSelection()
+    if not prof then
+        PageOpeners.professions() -- nothing saved yet: the Recipes tab has the Load button
+        return
+    end
+    local target = view.target or RouteTarget(prof.skill or 1)
+    if shop.single or not shop.route or shop.route.char ~= view.char or shop.route.name ~= view.prof
+        or shop.route.target ~= target then
+        ShowRoute(prof, view.prof, target, view.char)
+    else
+        shopFrame = shopFrame or BuildShoppingFrame()
+        shopFrame:Show()
+        RefreshShoppingList()
+    end
 end
 
 -- Listens from the start, so the auction house opening is never missed.
