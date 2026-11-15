@@ -478,6 +478,21 @@ print(rt.eval(r'''(function()
   shownQty = nil; ev2(S, "COMMODITY_SEARCH_RESULTS_UPDATED", row.item); runTimers()
   out[#out+1] = "ah: listings arrived, amount filled again="..tostring(shownQty)
   out[#out+1] = "ah: anything bought by Windfall? started="..tostring(startedQty).." confirmed="..tostring(confirmedQty)
+  -- a second item while still on the first item's buy page, with a busy auction house
+  local cbf = CreateFrame("Frame"); cbf.shown = true; cbf.BuyDisplay = display
+  AuctionHouseFrame.CommoditiesBuyFrame = cbf
+  tabClicks = 0; AuctionHouseFrameBuyTab = { Click = function() tabClicks = tabClicks + 1; cbf.shown = false end }
+  ahReady = false; C_AuctionHouse.IsThrottledMessageSystemReady = function() return ahReady end
+  selected = nil; knownKeys[2320] = { isCommodity = true }
+  local row2; for i = 1, 6 do if S.rows[i]:IsShown() and S.rows[i].item ~= row.item and S.rows[i].buy:IsShown() then row2 = S.rows[i] break end end
+  if not row2 then row2 = row; out[#out+1] = "ah: (only one row to show, reusing it)" end
+  row2.buy.onOnClick(row2.buy); runTimers()
+  out[#out+1] = "ah: second item, busy auction house -> tab clicks="..tabClicks.." selected="..tostring(selected).." status: "..tostring(S.status.text)
+  ahReady = true; ev2(S, "AUCTION_HOUSE_THROTTLED_SYSTEM_READY")
+  out[#out+1] = "ah: auction house ready -> selected="..tostring(selected).." status: "..tostring(S.status.text)
+  -- no listings arrive: one retry after 4 s
+  selected = nil; runTimers(); runTimers()
+  out[#out+1] = "ah: no listings came -> retried, tab clicks="..tabClicks.." selected again="..tostring(selected)
   ev2(S, "AUCTION_HOUSE_CLOSED"); sh("AH closed")
   -- vendor buying and crafting from the route window
   local S = WindfallShoppingFrame

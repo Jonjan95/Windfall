@@ -2840,25 +2840,78 @@ local function SetBuyQuantity()
     end
 end
 
+-- Is the auction house on some item's buy page right now?
+local function OnBuyPage()
+    local ahFrame = _G.AuctionHouseFrame
+    for _, key in ipairs({ "CommoditiesBuyFrame", "ItemBuyFrame" }) do
+        local page = ahFrame and ahFrame[key]
+        if type(page) == "table" and page.IsShown and page:IsShown() then return true end
+    end
+    return false
+end
+
+-- Back to the Buy tab's list, as clicking the tab does. Asking for a new item
+-- straight from another item's page can leave the auction house searching.
+local function BackToBuyTab()
+    local tab = _G.AuctionHouseFrameBuyTab
+    if tab and tab.Click then pcall(tab.Click, tab) end
+end
+
+-- The auction house takes one request at a time; asking while it is busy
+-- leaves it searching.
+local function AuctionHouseReady()
+    return not (AH and AH.IsThrottledMessageSystemReady) or AH.IsThrottledMessageSystemReady()
+end
+
 local function OpenBuyPage()
     local ahFrame = _G.AuctionHouseFrame
     if not (showing and ahFrame and ahFrame.SelectBrowseResult and AH and AH.MakeItemKey) then return false end
     local itemKey = AH.MakeItemKey(showing.id)
     -- The game needs to know the item first; if not, it says so with an event.
     if AH.GetItemKeyInfo and not AH.GetItemKeyInfo(itemKey) then return false end
+    if not AuctionHouseReady() then
+        showing.waiting = true -- opened when the auction house says it is ready
+        return false
+    end
+    showing.waiting = false
     local ok = pcall(ahFrame.SelectBrowseResult, ahFrame, { itemKey = itemKey, minPrice = 0, totalQuantity = 0 })
     if not ok then return false end
+    showing.opened, showing.listed = GetTime(), false
     C_Timer.After(0.3, SetBuyQuantity)
+    -- Still no listings after a few seconds: start over once, as changing tab does.
+    local mine = showing
+    C_Timer.After(4, function()
+        if showing == mine and not mine.listed and not mine.retried and ahOpen then
+            mine.retried = true
+            BackToBuyTab()
+            C_Timer.After(0.5, function()
+                if showing == mine and OpenBuyPage() then
+                    Status(string.format("Showing %s: buy %d in the auction house.", ItemName(mine.id), mine.qty))
+                end
+            end)
+        end
+    end)
     return true
 end
 
 local function ShowInAuctionHouse(itemID, qty)
     if not ahOpen then return end
     showing = { id = itemID, qty = qty }
-    if OpenBuyPage() then
-        Status(string.format("Showing %s: buy %d in the auction house.", ItemName(itemID), qty))
+    local function Open()
+        if OpenBuyPage() then
+            Status(string.format("Showing %s: buy %d in the auction house.", ItemName(itemID), qty))
+        elseif showing and showing.waiting then
+            Status("Waiting for the auction house to be ready for " .. ItemName(itemID) .. "...")
+        else
+            Status("Looking up " .. ItemName(itemID) .. "...")
+        end
+    end
+    -- From another item's page, back to the list first.
+    if OnBuyPage() then
+        BackToBuyTab()
+        C_Timer.After(0.3, Open)
     else
-        Status("Looking up " .. ItemName(itemID) .. "...")
+        Open()
     end
 end
 
@@ -2911,7 +2964,18 @@ local function OnAuctionEvent(event, ...)
         end
     elseif event == "COMMODITY_SEARCH_RESULTS_UPDATED" then
         local itemID = ...
-        if showing and itemID == showing.id then C_Timer.After(0, SetBuyQuantity) end
+        if showing and itemID == showing.id then
+            showing.listed = true
+            C_Timer.After(0, SetBuyQuantity)
+        end
+    elseif event == "ITEM_SEARCH_RESULTS_UPDATED" then
+        local itemKey = ...
+        if showing and itemKey and itemKey.itemID == showing.id then showing.listed = true end
+    elseif event == "AUCTION_HOUSE_THROTTLED_SYSTEM_READY" then
+        -- Waiting to open an item: the auction house is free now.
+        if showing and showing.waiting and OpenBuyPage() then
+            Status(string.format("Showing %s: buy %d in the auction house.", ItemName(showing.id), showing.qty))
+        end
     end
     if RefreshShoppingList then RefreshShoppingList() end
 end
@@ -3230,7 +3294,8 @@ auctionEvents:SetScript("OnEvent", function(_, event, ...)
     end
 end)
 for _, event in ipairs({ "BAG_UPDATE_DELAYED", "AUCTION_HOUSE_SHOW", "AUCTION_HOUSE_CLOSED",
-    "ITEM_KEY_ITEM_INFO_RECEIVED", "COMMODITY_SEARCH_RESULTS_UPDATED",
+    "ITEM_KEY_ITEM_INFO_RECEIVED", "COMMODITY_SEARCH_RESULTS_UPDATED", "ITEM_SEARCH_RESULTS_UPDATED",
+    "AUCTION_HOUSE_THROTTLED_SYSTEM_READY",
     "MERCHANT_SHOW", "MERCHANT_UPDATE", "MERCHANT_CLOSED",
     "NEW_RECIPE_LEARNED", "LEARNED_SPELL_IN_TAB", "TRAINER_UPDATE", "SKILL_LINES_CHANGED" }) do
     pcall(auctionEvents.RegisterEvent, auctionEvents, event)
