@@ -82,7 +82,8 @@ offhand = nil containers = {} timers = {}
 function GetInventoryItemID(_, slot) if slot == 17 then return offhand end return mainhand end
 function GetInventoryItemLink(_, slot) local id = GetInventoryItemID(nil, slot) return id and ("link:"..id) or nil end
 C_Container = { GetContainerNumSlots=function(b) return containers[b] and #containers[b] or 0 end,
-  GetContainerItemID=function(b,s) return containers[b] and containers[b][s] end }
+  GetContainerItemID=function(b,s) return containers[b] and containers[b][s] end,
+  GetContainerItemInfo=function(b,s) local id = containers[b] and containers[b][s]; if id then return { itemID = id, stackCount = (slotCounts and slotCounts[b] and slotCounts[b][s]) or 1 } end end }
 C_Item.EquipItemByName = function(item, slot)
   local id = tonumber(tostring(item):match("%d+"))
   if slot == 17 then offhand = id else mainhand = id; if id == 6256 then offhand = nil end end
@@ -106,7 +107,7 @@ do local oldNT = C_Timer.NewTicker
   C_Timer.NewTicker = function(d, fn) if d == 0.2 then sparkleTick = fn; return { Cancel=function() sparkleTick = function() end end } end return oldNT(d, fn) end end
 player = "Jonis" class = "PALADIN" trade = nil linked = false tipLines = {}
 do local oldUN = UnitName
-  function UnitName(u) if u == "player" then return player end return oldUN(u) end end
+  function UnitName(u) if u == "player" then return player, playerSurname end return oldUN(u) end end
 function GetRealmName() return "Realm" end
 function time() return 1763200000 end
 function UnitClass() return class, class end
@@ -382,8 +383,14 @@ print(rt.eval(r'''(function()
   local function pw(label)
     local P = WindfallProfessionsFrame
     out[#out+1] = "prof: "..label.." -> ["..tostring(P.charButton.text).."] ["..tostring(P.profButton.text).."] ["..tostring(P.modeButton.text).."] "..tostring(P.skill.text).." | hint: "..tostring(P.hint.text)
-    out[#out+1] = "      "..P.head.name.text.." | "..P.head.cost.text.." | "..P.head.value.text.." | "..tostring(P.head.profit.text)
-    for i = 1, 5 do local r = P.rows[i]; if r.name.text ~= "" then out[#out+1] = "      "..r.name.text.." | "..r.cost.text.." | "..r.value.text.." | "..r.profit.text end end
+    out[#out+1] = "      "..P.head.name.text.." | "..tostring(P.head.profit.text)
+    for i = 1, 5 do local r = P.rows[i]; if r.name.text ~= "" then out[#out+1] = "      "..r.name.text.." | "..tostring(rawget(r.profit, "text")) end end
+    local D = P.detail
+    if D:IsShown() then
+      out[#out+1] = "      detail: "..tostring(rawget(D.name, "text")).." / "..tostring(rawget(D.sub, "text"))
+      for i = 1, 3 do local l = D.reagents[i]; if rawget(l, "shown") ~= false and rawget(l, "text") then out[#out+1] = "        "..l.text.." | "..tostring(rawget(l.count, "text")).." | "..tostring(rawget(l.alts, "text")) end end
+      out[#out+1] = "        "..tostring(rawget(D.money, "text")):gsub("\n", " / ")
+    end
   end
   SlashCmdList.WINDFALL("prof"); pw("before any profession window")
   player = "Jonis"; class = "PALADIN"
@@ -629,5 +636,43 @@ print(rt.eval(r'''(function()
   ev(nil, "TRADE_SKILL_SHOW"); runTimers()
   out[#out+1] = "priest: after the window opened -> route="..tostring(S2.title2.text).." now="..tostring(S2.now.text).." unloaded="..tostring(WindfallDB.chars["Jonjan-Realm"].professions.Enchanting.unloaded)
   GetProfessionInfo = oldGPI2; player = "Huntie"; class = "HUNTER"
+  -- two characters called Zivv: Zivv Gg (Alchemy 300) and Zivv Zniper (carries herbs)
+  WindfallDB.chars["Zivv-Realm"] = { class = "ROGUE", professions = { Alchemy = { skill = 300, max = 300, line = 171, recipes = {} } } }
+  player = "Zivv"; playerSurname = "Gg"; class = "ROGUE"; playerLevel = 60
+  gatherProfs = { 171 }; profNames = { [171] = "Alchemy" }
+  local oldGPI3 = GetProfessionInfo
+  GetProfessionInfo = function(i) local line = gatherProfs[i - 100]; if line then return profNames[line], 1, 300, 300, 0, 0, line, 0 end return oldGPI3(i) end
+  ev(nil, "SKILL_LINES_CHANGED"); runTimers()
+  out[#out+1] = "zivv: old 'Zivv' entry -> "..tostring(WindfallDB.chars["Zivv-Realm"] ~= nil).." | 'Zivv Gg' -> "..tostring(WindfallDB.chars["Zivv Gg-Realm"] ~= nil).." name="..tostring(WindfallDB.chars["Zivv Gg-Realm"] and WindfallDB.chars["Zivv Gg-Realm"].name)
+  -- Zivv Gg opens Alchemy: a recipe that earns, and herbs in the bags
+  trade = { name = "Alchemy", id = 171, skill = 300, max = 300, recipes = {
+    [17556] = { name = "Major Healing Potion", item = 13446, rd = 3, reagents = { {13464, 2}, {13465, 1}, {8925, 1} } },
+    [11461] = { name = "Arcane Elixir", item = 9155, rd = 3, reagents = { {8839, 1}, {8925, 1} } } } }
+  bags[13464] = 3; bags[13465] = 1; bags[8925] = 5
+  ev(nil, "TRADE_SKILL_SHOW"); runTimers()
+  -- log over to Zivv Zniper, who carries 20 Golden Sansam
+  containers = { [0] = { 13464 } }; slotCounts = { [0] = { 20 } }
+  player = "Zivv"; playerSurname = "Zniper"; gatherProfs = {}
+  ev(nil, "SKILL_LINES_CHANGED"); ev(nil, "BAG_UPDATE_DELAYED"); runTimers()
+  local zn = WindfallDB.chars["Zivv Zniper-Realm"]
+  out[#out+1] = "zivv: Zivv Zniper saved -> "..tostring(zn ~= nil).." bags Golden Sansam="..tostring(zn and zn.bags and zn.bags[13464])
+  -- from Zivv Zniper, look at Zivv Gg's Alchemy
+  local PN, H = WindfallPanel, WindfallPanel.header
+  if not PN.shown then WindfallBar.menu.onOnClick(WindfallBar.menu) end
+  PN.Tabs[2].onOnClick(PN.Tabs[2])
+  H.char.onOnClick(H.char)
+  local list = {}; for _, r in ipairs(WindfallCharMenu.rows) do if r:IsShown() then list[#list+1] = r.text.text end end
+  out[#out+1] = "zivv: character list -> "..table.concat(list, " || ")
+  for _, r in ipairs(WindfallCharMenu.rows) do if r:IsShown() and r.key == "Zivv Gg-Realm" then r.onOnClick(r) end end
+  local P = WindfallProfessionsFrame
+  out[#out+1] = "zivv: Recipes for "..tostring(H.char.text).." -> "..tostring(P.rows[1].name.text).." | "..tostring(P.rows[2].name.text)
+  local D = P.detail
+  for i = 1, 3 do local l = D.reagents[i]; if rawget(l, "text") then out[#out+1] = "      "..l.text.." | "..tostring(rawget(l.count, "text")).." | "..tostring(rawget(l.alts, "text")) end end
+  out[#out+1] = "      "..tostring(rawget(D.money, "text")):gsub("\n", " / ")
+  PN.Tabs[1].onOnClick(PN.Tabs[1])
+  local S = WindfallShoppingFrame
+  out[#out+1] = "zivv: Levelling -> "..tostring(S.title2.text).." | now: "..tostring(S.now.text)
+  for i = 1, 3 do local t = rawget(S.lines[i], "text"); if t and t ~= "" then out[#out+1] = "      "..t end end
+  GetProfessionInfo = oldGPI3; playerSurname = nil; player = "Huntie"; class = "HUNTER"; containers = {}
   return table.concat(out, "\n")
 end)()''').replace("|cffffd700g|r","g").replace("|cffc7c7cfs|r","s").replace("|cffeda55fc|r","c"))

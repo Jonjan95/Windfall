@@ -29,6 +29,7 @@ local ResetInteract
 local ToggleProfessions, RefreshProfessions, RefreshHeader
 local NewPage, TogglePanel, DockPanel, UndockPanel, PageOpeners
 local PanelHeader, SetPanelHeaderRefresh, SetPanelPortrait, CurrentSelection, NoteCharacter, CharacterKeyNow
+local SaveInventory, SetBankOpen, HaveCount, TopProfit, CanMake, ShowRecipeDetail
 local bar, BuildBar, UpdateBar, UpdateBarIcons
 local FISH_ICON, fishingNow, UpdateFishIcon, StartKeyCapture, ReleaseCVars, FishingSkill, OnLureCastStart, OnLureCastSucceeded, OnLureCastEnded
 local UpdateAutoLoot, SetFishing, SetFishKey, OnMainHandChanged, OnCombatEnded, OnChannelStart, OnChannelStop, InitFishing
@@ -2238,6 +2239,8 @@ do
 
 local AH_CUT = 0.05
 local PROF_ROWS = 18
+local LIST_W = 300  -- the recipe list on the Recipes tab
+local DETAIL_W = 300 -- the picked recipe next to it
 local PROF_WIDTH = 520
 local DIFFICULTY_BY_NUMBER = { [0] = "optimal", [1] = "medium", [2] = "easy", [3] = "trivial" }
 DIFFICULTY_COLOR = {
@@ -2248,10 +2251,37 @@ local DIFFICULTY_LABEL = {
     easy = "sometimes gives a skill point", trivial = "gives no skill",
 }
 
+-- The character's full name. Forever characters have a surname, which
+-- UnitName gives as its second value; joined as the game's own frames show it.
+local function FullName()
+    local first, surname = (UnitNameUnmodified or UnitName)("player")
+    if type(surname) == "string" and surname ~= "" and not (issecretvalue and issecretvalue(surname)) then
+        local sep = Constants and Constants.CharacterNameSeparatorConsts
+            and Constants.CharacterNameSeparatorConsts.CHARACTERNAME_SURNAME_SEPARATOR or " "
+        return first .. sep .. surname
+    end
+    return first
+end
+
+-- Saved under full name and realm: two characters with the same first name
+-- (Zivv Gg and Zivv Zniper) are kept apart.
 local function CharacterKey()
-    local name = UnitName("player")
     local realm = GetRealmName and GetRealmName() or ""
-    return (name or "?") .. "-" .. realm
+    return (FullName() or "?") .. "-" .. realm
+end
+
+-- Before 0.2.38 characters were saved under their first name only. That entry
+-- goes to the first character of that name to log in, if its professions are
+-- this character's; otherwise it stays as it was.
+local function AdoptOldEntry(key, professionNames)
+    local first = UnitName("player")
+    local old = (first or "?") .. "-" .. (GetRealmName and GetRealmName() or "")
+    if old == key or not db.chars[old] or db.chars[key] then return end
+    for name in pairs(db.chars[old].professions or {}) do
+        if not professionNames[name] then return end
+    end
+    db.chars[key] = db.chars[old]
+    db.chars[old] = nil
 end
 
 -- A recipe's reagents and what it makes, from the game. Works for recipes
@@ -2339,6 +2369,7 @@ local function SaveProfession()
     db.chars[key] = char
     local _, class = UnitClass("player")
     char.class = class
+    char.name = FullName()
     char.level = UnitLevel and UnitLevel("player")
     char.professions[base.professionName] = {
         skill = skillInfo.skillLevel, max = skillInfo.maxSkillLevel, line = line,
@@ -2358,6 +2389,97 @@ function SaveProfessionSoon()
         -- The route moves on as your skill goes up.
         if RebuildRoute then RebuildRoute() end
     end)
+end
+
+-- Materials on hand, per character: the bags whenever they change, the bank
+-- whenever it is open. So every character's materials are known on any other.
+local BAGS = { 0, 1, 2, 3, 4 }
+local bankOpen = false
+local inventoryPending = false
+
+local function BankBags()
+    local bags = { BANK_CONTAINER or -1 }
+    local first = (NUM_BAG_SLOTS or 4) + 1
+    for bag = first, first + (NUM_BANKBAGSLOTS or 6) - 1 do bags[#bags + 1] = bag end
+    return bags
+end
+
+local function CountContainers(bags)
+    local counts = {}
+    if not (C_Container and C_Container.GetContainerNumSlots and C_Container.GetContainerItemInfo) then return counts end
+    for _, bag in ipairs(bags) do
+        local ok, slots = pcall(C_Container.GetContainerNumSlots, bag)
+        for slot = 1, (ok and slots) or 0 do
+            local info = C_Container.GetContainerItemInfo(bag, slot)
+            if info and info.itemID then
+                counts[info.itemID] = (counts[info.itemID] or 0) + (info.stackCount or 1)
+            end
+        end
+    end
+    return counts
+end
+
+local function MyCharacter()
+    db.chars = db.chars or {}
+    local key = CharacterKey()
+    local char = db.chars[key]
+    if not char then
+        char = { professions = {} }
+        db.chars[key] = char
+    end
+    local _, class = UnitClass("player")
+    char.class, char.name = class or char.class, FullName() or char.name
+    return char
+end
+
+function SaveInventory()
+    if inventoryPending or not db then return end
+    inventoryPending = true
+    -- Bags change in bursts; count once they have settled.
+    C_Timer.After(0.5, function()
+        inventoryPending = false
+        local char = MyCharacter()
+        char.bags = CountContainers(BAGS)
+        if bankOpen then char.bank = CountContainers(BankBags()) end
+    end)
+end
+
+function SetBankOpen(open)
+    bankOpen = open
+    if open then SaveInventory() end
+end
+
+-- How many of an item a character has in bags and bank, how many all your
+-- other characters have, and who.
+local function LiveCount(itemID)
+    local count = (C_Item and C_Item.GetItemCount) or GetItemCount
+    return count and count(itemID, true) or 0
+end
+
+local function SavedCount(char, itemID)
+    return ((char.bags or {})[itemID] or 0) + ((char.bank or {})[itemID] or 0)
+end
+
+function HaveCount(charKey, itemID)
+    local me = CharacterKey()
+    local here
+    if charKey == me then
+        here = LiveCount(itemID)
+    else
+        local char = db.chars and db.chars[charKey]
+        here = char and SavedCount(char, itemID) or 0
+    end
+    local others, who = 0, {}
+    for key, char in pairs(db.chars or {}) do
+        if key ~= charKey then
+            local n = key == me and LiveCount(itemID) or SavedCount(char, itemID)
+            if n > 0 then
+                others = others + n
+                who[#who + 1] = { key = key, n = n }
+            end
+        end
+    end
+    return here, others, who
 end
 
 -- This character's crafting professions that Windfall has not saved yet.
@@ -2385,9 +2507,16 @@ function NoteCharacter()
     if not (db and GetProfessions and GetProfessionInfo) then return end
     db.chars = db.chars or {}
     local key = CharacterKey()
+    local names = {}
+    for _, index in pairs({ GetProfessions() }) do
+        local name = GetProfessionInfo(index)
+        if name then names[name] = true end
+    end
+    AdoptOldEntry(key, names)
     local char = db.chars[key] or { professions = {} }
     local _, class = UnitClass("player")
     char.class = class
+    char.name = FullName()
     char.level = UnitLevel and UnitLevel("player")
     local any = false
     for _, index in pairs({ GetProfessions() }) do
@@ -2480,6 +2609,8 @@ local function CurrentProfession()
 end
 
 local function ShortName(key)
+    local char = db.chars and db.chars[key]
+    if char and char.name then return char.name end
     return (key or ""):match("^(.-)%-") or key
 end
 
@@ -2732,6 +2863,79 @@ local function RecipeTooltip(row)
     GameTooltip:Show()
 end
 
+-- How many times a character can make a recipe from what it holds.
+function CanMake(charKey, recipe)
+    local n
+    for _, r in ipairs(recipe.reagents or {}) do
+        local here = HaveCount(charKey, r[1])
+        local can = math.floor(here / r[2])
+        n = n and math.min(n, can) or can
+    end
+    return n or 0
+end
+
+local function WhoHas(who)
+    table.sort(who, function(a, b) return a.n > b.n end)
+    local parts = {}
+    for i = 1, math.min(#who, 3) do parts[#parts + 1] = string.format("%s %d", ShortName(who[i].key), who[i].n) end
+    if #who > 3 then parts[#parts + 1] = "..." end
+    return table.concat(parts, ", ")
+end
+
+function ShowRecipeDetail(f, prof)
+    local d = f.detail
+    local e
+    for _, x in ipairs(profList) do
+        if x.id == profView.selected then e = x end
+    end
+    e = e or profList[1]
+    if not (e and e.recipe) then d:Hide() return end
+    profView.selected = e.id
+    d:Show()
+    local recipe = e.recipe
+    local icon = recipe.item and ItemIcon(recipe.item)
+        or (C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(e.id)) or 134400
+    d.icon:SetTexture(icon)
+    d.name:SetText((DIFFICULTY_COLOR[recipe.diff] or "|cffffffff") .. (recipe.name or "?") .. "|r")
+    local chance = ns.SkillUps and ns.SkillUps[e.id] and SkillUpChance(e.id, nil, prof.skill or 0)
+    local skillText = chance and (chance >= 1 and "always gives a skill point"
+        or chance > 0 and string.format("%d%% chance of a skill point", math.floor(chance * 100 + 0.5))
+        or "gives no skill") or (DIFFICULTY_LABEL[recipe.diff] or "")
+    d.sub:SetText((recipe.qty and recipe.qty ~= 1 and string.format("Makes %g. ", recipe.qty) or "") .. skillText)
+    for i, line in ipairs(d.reagents) do
+        local r = recipe.reagents[i]
+        if r then
+            local here, others, who = HaveCount(profView.char, r[1])
+            line:SetText(string.format("|T%s:16|t %s", tostring(ItemIcon(r[1])),
+                (C_Item and C_Item.GetItemNameByID and C_Item.GetItemNameByID(r[1])) or ("item " .. r[1])))
+            line.count:SetText(string.format("%s%d|r / %d", here >= r[2] and "|cff7fd36b" or "|cffff6060", here, r[2]))
+            line.alts:SetText(others > 0 and ("on other characters: " .. WhoHas(who)) or "")
+            line:Show() line.count:Show() line.alts:Show()
+        else
+            line:Hide() line.count:Hide() line.alts:Hide()
+        end
+    end
+    local shown = math.min(#recipe.reagents, #d.reagents)
+    d.money:ClearAllPoints()
+    d.money:SetPoint("TOPLEFT", 0, -76 - shown * 30)
+    local can = CanMake(profView.char, recipe)
+    d.money:SetText(string.format("Cost: %s%s\nSells for: %s\nProfit: %s\n\n%s",
+        Money(e.cost), e.missing and " |cffff6060+ unpriced|r" or "",
+        e.value and Money(e.value) or "|cff888888-|r",
+        e.profit and SignedMoney(e.profit) or "|cff888888?|r",
+        can > 0 and string.format("|cff7fd36b%s can make %d.|r", ShortName(profView.char), can)
+            or string.format("|cff999999%s has not got the reagents.|r", ShortName(profView.char))))
+end
+
+-- The recipes that earn the most, for a maxed profession's Levelling tab.
+function TopProfit(prof, n)
+    local list, out = BuildProfitList(prof), {}
+    for _, e in ipairs(list) do
+        if e.profit and e.profit > 0 and #out < n then out[#out + 1] = e end
+    end
+    return out
+end
+
 local function BuildProfessionsFrame()
     local f = MakeWindow("WindfallProfessionsFrame", "Recipes", PROF_WIDTH, "professions")
     f:SetHeight(84 + PROF_ROWS * ROW_H + 40)
@@ -2774,36 +2978,40 @@ local function BuildProfessionsFrame()
     f.skill = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     f.skill:SetPoint("TOPRIGHT", -14, -36)
 
+    -- The list on the left (name and profit), the picked recipe on the right.
     local function Column(row, template)
         row.name = f:CreateFontString(nil, "OVERLAY", template)
-        row.name:SetWidth(PROF_WIDTH - 290)
+        row.name:SetWidth(LIST_W - 90)
         row.name:SetJustifyH("LEFT")
         row.name:SetWordWrap(false)
         row.cost = f:CreateFontString(nil, "OVERLAY", template)
         row.value = f:CreateFontString(nil, "OVERLAY", template)
         row.profit = f:CreateFontString(nil, "OVERLAY", template)
+        row.cost:Hide()
+        row.value:Hide()
     end
     local function Place(row, y)
         row.name:SetPoint("TOPLEFT", 12, y)
-        row.cost:SetPoint("TOPRIGHT", -196, y)
-        row.value:SetPoint("TOPRIGHT", -104, y)
-        row.profit:SetPoint("TOPRIGHT", -14, y)
+        row.profit:SetPoint("TOPRIGHT", f, "TOPLEFT", LIST_W, y)
     end
     f.head = {}
     Column(f.head, "GameFontDisableSmall")
     Place(f.head, -62)
     f.head.name:SetText("Recipe")
-    f.head.cost:SetText("Cost")
-    f.head.value:SetText("Sells for")
 
     f.rows = {}
     for i = 1, PROF_ROWS do
         local y = -78 - (i - 1) * ROW_H
         local row = CreateFrame("Button", nil, f)
         row:SetPoint("TOPLEFT", 8, y + 2)
-        row:SetSize(PROF_WIDTH - 16, ROW_H)
-        row:SetScript("OnEnter", RecipeTooltip)
-        row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        row:SetSize(LIST_W - 4, ROW_H)
+        row:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
+        row:SetScript("OnClick", function(self)
+            if self.entry and self.entry.id then
+                profView.selected = self.entry.id
+                RefreshProfessions()
+            end
+        end)
 
         Column(row, "GameFontHighlightSmall")
         Place(row, y)
@@ -2816,6 +3024,46 @@ local function BuildProfessionsFrame()
         profView.offset = math.max(0, math.min(maxOffset, profView.offset - delta * 3))
         RefreshProfessions()
     end)
+
+    -- The picked recipe, like the right side of the profession window.
+    local d = CreateFrame("Frame", nil, f)
+    d:SetPoint("TOPLEFT", LIST_W + 14, -60)
+    d:SetSize(DETAIL_W, 420)
+    d.icon = d:CreateTexture(nil, "ARTWORK")
+    d.icon:SetSize(36, 36)
+    d.icon:SetPoint("TOPLEFT", 0, 0)
+    d.name = d:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    d.name:SetPoint("TOPLEFT", d.icon, "TOPRIGHT", 8, -1)
+    d.name:SetWidth(DETAIL_W - 46)
+    d.name:SetJustifyH("LEFT")
+    d.sub = d:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    d.sub:SetPoint("TOPLEFT", d.name, "BOTTOMLEFT", 0, -3)
+    d.sub:SetWidth(DETAIL_W - 46)
+    d.sub:SetJustifyH("LEFT")
+    d.reagentHead = d:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    d.reagentHead:SetPoint("TOPLEFT", 0, -50)
+    d.reagentHead:SetText("Reagents")
+    d.reagents = {}
+    for i = 1, 8 do
+        local line = d:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        line:SetPoint("TOPLEFT", 4, -68 - (i - 1) * 30)
+        line:SetWidth(DETAIL_W - 70)
+        line:SetJustifyH("LEFT")
+        line:SetWordWrap(false)
+        line.count = d:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        line.count:SetPoint("TOPRIGHT", d, "TOPRIGHT", 0, -68 - (i - 1) * 30)
+        line.alts = d:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        line.alts:SetPoint("TOPLEFT", line, "BOTTOMLEFT", 18, -2)
+        line.alts:SetWidth(DETAIL_W - 22)
+        line.alts:SetJustifyH("LEFT")
+        line.alts:SetWordWrap(false)
+        d.reagents[i] = line
+    end
+    d.money = d:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    d.money:SetJustifyH("LEFT")
+    d.money:SetWidth(DETAIL_W)
+    d.money:SetSpacing(3)
+    f.detail = d
 
     f.hint = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     f.hint:SetPoint("BOTTOMLEFT", 12, 14)
@@ -2976,7 +3224,9 @@ function RefreshProfessions()
         else
             local train = ((e.train or 0) > 0 and " |cff888888(train)|r" or "")
                 .. ((e.chance and e.chance < 1) and string.format(" |cff888888%d%%|r", math.floor(e.chance * 100 + 0.5)) or "")
-            row.name:SetText((DIFFICULTY_COLOR[e.recipe.diff] or "|cffffffff") .. (e.recipe.name or "?") .. "|r" .. train)
+            local can = CanMake(profView.char, e.recipe)
+            row.name:SetText((DIFFICULTY_COLOR[e.recipe.diff] or "|cffffffff") .. (e.recipe.name or "?") .. "|r"
+                .. (can > 0 and string.format(" |cffffffff(%d)|r", can) or "") .. train)
             if e.missing and e.cost == 0 then
                 row.cost:SetText("|cff888888?|r")
             else
@@ -2994,6 +3244,8 @@ function RefreshProfessions()
             end
         end
     end
+
+    ShowRecipeDetail(f, prof)
 
     local age = math.floor((time() - (prof.saved or time())) / 86400)
     local hint = (age >= 1 and string.format("Saved %d day%s ago. ", age, age == 1 and "" or "s") or "")
@@ -3629,9 +3881,15 @@ local function BuyFromVendor(itemID, qty)
     return cost
 end
 
+-- What the route's character holds (bags and bank; saved for other characters).
+local function HereCount(itemID)
+    if shop.route and HaveCount then return (HaveCount(shop.route.char, itemID)) end
+    return BagCountOf(itemID)
+end
+
 function ToBuy(item)
     local need = item.need * (shop.single and shop.crafts or 1)
-    return math.max(0, need - BagCountOf(item.id))
+    return math.max(0, need - HereCount(item.id))
 end
 
 local function BuyAllHere()
@@ -3745,6 +4003,9 @@ function RefreshShoppingList()
         end
     elseif nowShown and now.gap then
         f.now:SetText(string.format("|cffff6060No priced recipe from %d.|r Scan the auction house with Auctionator, then come back to this tab.", now.gap))
+    elseif nowShown and now.maxed then
+        f.now:SetText("|cff7fd36b" .. (shop.route and shop.route.name or "") .. " is maxed.|r Best earners at today's prices "
+            .. "(the Recipes tab has them all):")
     elseif nowShown then
         f.now:SetText("|cff7fd36bDone: you reached " .. (shop.route and shop.route.target or "") .. ".|r")
     end
@@ -3763,7 +4024,7 @@ function RefreshShoppingList()
     -- Everything counts in the total, also what does not fit in the rows.
     for i = #f.rows + 1, #shop.items do
         local item = shop.items[i]
-        local buy = math.max(0, item.need * (shop.single and shop.crafts or 1) - BagCountOf(item.id))
+        local buy = math.max(0, item.need * (shop.single and shop.crafts or 1) - HereCount(item.id))
         local price = ReagentPrice(item.id)
         if buy > 0 then
             if price then total = total + price * buy else missing = true end
@@ -3777,11 +4038,13 @@ function RefreshShoppingList()
         row:SetPoint("TOPLEFT", 8, y)
         if item then
             local need = item.need * (shop.single and shop.crafts or 1)
-            local have = BagCountOf(item.id)
+            local have, others = HereCount(item.id), 0
+            if shop.route and HaveCount then _, others = HaveCount(shop.route.char, item.id) end
             local buy = math.max(0, need - have)
             local price, fromVendor = ReagentPrice(item.id)
             row.name:SetText(string.format("|T%s:14|t %s", tostring(ItemIcon(item.id)), ItemName(item.id)))
-            row.need:SetText(string.format("%d |cff888888(%d in bags)|r", need, have))
+            row.need:SetText(string.format("%d |cff888888(%d here%s)|r", need, have,
+                others > 0 and string.format(", %d on others", others) or ""))
             if buy == 0 then
                 row.total:SetText("|cff7fd36bhave all|r")
             elseif price then
@@ -4039,7 +4302,18 @@ local function FillRoute(keepStatus)
     end
     -- Nothing to do: either the target is reached, or no recipe has prices yet.
     if not shop.now then
-        shop.now = (prof.skill or 0) >= r.target and { finished = true } or { gap = gaps[1] or prof.skill or 1 }
+        shop.now = (prof.skill or 0) >= r.target and { finished = true, maxed = (prof.skill or 0) >= 300 }
+            or { gap = gaps[1] or prof.skill or 1 }
+    end
+    -- Nothing left to level: the recipes that earn the most instead.
+    if shop.now.finished then
+        shop.lines, shop.items = {}, {}
+        local top = TopProfit and TopProfit(prof, SHOP_STEP_ROWS) or {}
+        for _, e in ipairs(top) do
+            shop.lines[#shop.lines + 1] = string.format("%s%s|r  |cff7fd36b+%s|r a craft", DIFFICULTY_COLOR[e.recipe.diff] or "",
+                e.recipe.name or "?", Money(e.profit))
+        end
+        if not top[1] then shop.lines[1] = "|cff999999Nothing earns at the current auction prices.|r" end
     end
     if #steps > #shop.lines then shop.lines[#shop.lines + 1] = "|cff888888... and more steps|r" end
     if gaps[1] then
@@ -4144,6 +4418,10 @@ events:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_START", "player")
 events:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_STOP", "player")
 events:RegisterEvent("PLAYER_REGEN_ENABLED")
 events:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
+events:RegisterEvent("BAG_UPDATE_DELAYED")
+pcall(events.RegisterEvent, events, "BANKFRAME_OPENED")
+pcall(events.RegisterEvent, events, "BANKFRAME_CLOSED")
+pcall(events.RegisterEvent, events, "PLAYERBANKSLOTS_CHANGED")
 events:RegisterEvent("ZONE_CHANGED_NEW_AREA")
 pcall(events.RegisterEvent, events, "SKILL_LINES_CHANGED") -- may not exist on every client
 pcall(events.RegisterEvent, events, "TRADE_SKILL_SHOW")
@@ -4171,6 +4449,7 @@ events:SetScript("OnEvent", function(_, event, arg1, _, arg3)
         CreateMinimapButton()
         InitFishing()
         NoteCharacter()
+        SaveInventory()
         if db.sparkle then StartSparkles() end
         UpdateFishIcon()
         C_Timer.NewTicker(1, Tick)
@@ -4187,6 +4466,12 @@ events:SetScript("OnEvent", function(_, event, arg1, _, arg3)
         OnChannelStop()
     elseif event == "PLAYER_REGEN_ENABLED" then
         OnCombatEnded()
+    elseif event == "BAG_UPDATE_DELAYED" or event == "PLAYERBANKSLOTS_CHANGED" then
+        SaveInventory()
+    elseif event == "BANKFRAME_OPENED" then
+        SetBankOpen(true)
+    elseif event == "BANKFRAME_CLOSED" then
+        SetBankOpen(false)
     elseif event == "PLAYER_EQUIPMENT_CHANGED" then
         if arg1 == 16 then OnMainHandChanged() end
         if db.fishOn then Refresh() end

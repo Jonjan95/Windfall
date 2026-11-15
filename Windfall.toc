@@ -1,8 +1,8 @@
 ## Interface: 16001
-## Title: Windfall |cff999999v0.2.37|r
+## Title: Windfall |cff999999v0.2.38|r
 ## Notes: Gold per hour from your farming, guided and priced profession levelling with buying and crafting, and a one-button fishing key.
 ## Author: Jonis
-## Version: 0.2.37
+## Version: 0.2.38
 ## IconTexture: Interface\AddOns\Windfall\Media\icon
 ## OptionalDeps: Auctionator
 ## SavedVariables: WindfallDB

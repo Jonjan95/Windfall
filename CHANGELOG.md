@@ -2,6 +2,14 @@
 
 All changes to Windfall, newest first. After an update, type `/reload` in game (or restart the game when the notes say so).
 
+## [0.2.38] - 2026-11-15
+
+- **Full character names.** Forever characters have a surname, and Windfall now uses the whole name ("Zivv Gg", "Zivv Zniper") everywhere. Characters with the same first name used to share one save; now each has its own. An old save under just the first name goes to the first character of that name to log in, if its professions match.
+- **Your whole account in one place.** Every character's bags are saved as they change, and its bank whenever you open it. Wherever Windfall counts materials it uses the character you are looking at, and also shows what your other characters hold.
+- **Recipes tab like the profession window:** the recipe list on the left (with how many you can make), and the picked recipe on the right: its reagents with how many that character has and needs, what your other characters have, cost, sale value, profit, and its skill-up chance. Look at any character's professions from any character.
+- **A maxed profession's Levelling tab** now lists the recipes that earn the most at today's prices, instead of only saying it is done.
+- The shopping list's counts include the bank, and show what is on other characters.
+
 ## [0.2.37] - 2026-11-15
 
 - **Every character shows up as soon as you log in**, with its crafting professions and skill, and the window opens on the character you are playing. Professions whose recipes Windfall has not read yet have a grey icon.
