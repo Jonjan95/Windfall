@@ -1937,6 +1937,7 @@ end
 
 -- ---------------------------------------------------------- professions ----
 local DIFFICULTY_COLOR, ReagentPrice, CraftNumbers, SKILL_CHANCE, TRAIN_SPREAD, GuessDifficulty, TrainerRecipe
+local SyncLearned
 local RouteTarget, ROUTE_TARGETS, RebuildRoute
 -- In a block of its own: the game allows a file at most 200 locals at the top.
 do
@@ -2210,6 +2211,25 @@ function TrainerRecipe(entry)
         reagents = (data and data.reagents) or {},
         noReagents = not data,
     }
+end
+
+-- Trainer recipes this character has learned since its profession window was
+-- last read: the game knows them as spells, so they count as known right away,
+-- with a guessed colour until the profession window says better.
+function SyncLearned(prof, charKey)
+    if not (prof and prof.line and IsPlayerSpell) or charKey ~= CharacterKey() then return false end
+    local added = false
+    for _, entry in ipairs(ns.TrainerRecipes[prof.line] or {}) do
+        local spell = entry[1]
+        if not entry.rank and not prof.recipes[spell] and IsPlayerSpell(spell) then
+            local recipe = TrainerRecipe(entry)
+            recipe.diff = GuessDifficulty(entry[2], prof.skill or 1)
+            recipe.noReagents = nil
+            prof.recipes[spell] = recipe
+            added = true
+        end
+    end
+    return added
 end
 
 local function BuildPlan(prof, char)
@@ -2535,6 +2555,7 @@ function RefreshProfessions()
     f.profButton:SetText(profView.prof)
     f.skill:SetText(string.format("Skill %d / %d", prof.skill or 0, prof.max or 0))
 
+    SyncLearned(prof, profView.char)
     profList = BuildProfList(prof, char)
     profView.offset = math.max(0, math.min(profView.offset, #profList - PROF_ROWS))
     for i, row in ipairs(f.rows) do
@@ -2802,6 +2823,14 @@ local function OnAuctionEvent(event, ...)
                 shopFrame:SetPoint("TOPLEFT", _G.MerchantFrame, "TOPRIGHT", 8, 0)
             end
         end
+    elseif event == "NEW_RECIPE_LEARNED" or event == "LEARNED_SPELL_IN_TAB" or event == "TRAINER_UPDATE"
+        or event == "SKILL_LINES_CHANGED" then
+        -- Learned a recipe or a rank at the trainer: look again in a moment,
+        -- once the game has it.
+        C_Timer.After(0.3, function()
+            if RebuildRoute then RebuildRoute() end
+            if RefreshProfessions then RefreshProfessions() end
+        end)
     elseif event == "MERCHANT_CLOSED" then
         merchantOpen = false
         merchantItems = {}
@@ -3132,7 +3161,8 @@ auctionEvents:SetScript("OnEvent", function(_, event, ...)
 end)
 for _, event in ipairs({ "BAG_UPDATE_DELAYED", "AUCTION_HOUSE_SHOW", "AUCTION_HOUSE_CLOSED",
     "ITEM_KEY_ITEM_INFO_RECEIVED", "COMMODITY_SEARCH_RESULTS_UPDATED",
-    "MERCHANT_SHOW", "MERCHANT_UPDATE", "MERCHANT_CLOSED" }) do
+    "MERCHANT_SHOW", "MERCHANT_UPDATE", "MERCHANT_CLOSED",
+    "NEW_RECIPE_LEARNED", "LEARNED_SPELL_IN_TAB", "TRAINER_UPDATE", "SKILL_LINES_CHANGED" }) do
     pcall(auctionEvents.RegisterEvent, auctionEvents, event)
 end
 
@@ -3149,6 +3179,7 @@ end
 local function FillRoute(keepStatus)
     local prof, r = RouteProfession()
     if not prof then return end
+    SyncLearned(prof, r.char)
     local steps, items, trainCost, gaps = BuildRoute(prof, r.target)
     shop.single = false
     shop.title = string.format("%s %d to %d", r.name, prof.skill or 1, r.target)

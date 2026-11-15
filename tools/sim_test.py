@@ -137,6 +137,8 @@ C_AuctionHouse = {
   ConfirmCommoditiesPurchase = function(id, qty) confirmedQty = qty end,
   CancelCommoditiesPurchase = function() end,
 }
+knownSpells = {}
+function IsPlayerSpell(id) return knownSpells[id] == true end
 merchant = {} buys = {} tradeReady = false craftedRecipe = nil craftedCount = nil openedLines = {}
 function GetMerchantNumItems() return #merchant end
 function GetMerchantItemID(i) return merchant[i] end
@@ -499,6 +501,9 @@ print(rt.eval(r'''(function()
   out[#out+1] = "guide: second Craft click crafted recipe "..tostring(craftedRecipe).." x"..tostring(craftedCount).." | status: "..tostring(S.status.text)
   -- skill goes up: the route moves on
   trade.skill = 40; ev(nil, "TRADE_SKILL_LIST_UPDATE"); runTimers(); g("skill went up to 40")
+  -- learned at the trainer while the window is open (profession window not opened since)
+  knownSpells[2153] = true; bags[2320] = 100
+  ev2(S, "NEW_RECIPE_LEARNED", 2153); runTimers(); g("learned Handstitched Leather Pants at the trainer")
   -- forget needs shift, load brings it back
   local P = WindfallProfessionsFrame
   if WindfallShoppingFrame then WindfallShoppingFrame:Hide() end

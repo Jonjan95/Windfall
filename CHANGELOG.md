@@ -2,6 +2,10 @@
 
 All changes to Windfall, newest first. After an update, type `/reload` in game (or restart the game when the notes say so).
 
+## [0.2.28] - 2026-11-15
+
+- **Learning a recipe updates the route straight away.** When you learn a recipe or a rank at the trainer, the route and the levelling plan notice it at once, so the Craft button shows while you are still at the trainer. Before, they only knew after you opened the profession window again.
+
 ## [0.2.27] - 2026-11-15
 
 - **Buy from vendors:** with a shopping list open at a vendor that sells something on it (Coarse Thread, for example), that row gets a Buy button for exactly what you still need, and *Buy all here* buys everything the vendor has on your list. The list docks next to the vendor window.
