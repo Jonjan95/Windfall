@@ -1070,6 +1070,29 @@ end
 
 local sparkleKind
 
+-- Which kinds of node this character can gather: Herbalism, Mining and
+-- Fishing, by skill line. Looked up again when skills change.
+local GATHER_SKILL_LINES = { [182] = "herb", [186] = "ore", [356] = "fish" }
+local canGather
+
+local function CanGather(kind)
+    if not canGather then
+        canGather = {}
+        if GetProfessions and GetProfessionInfo then
+            for _, index in pairs({ GetProfessions() }) do
+                local skillLine = select(7, GetProfessionInfo(index))
+                if GATHER_SKILL_LINES[skillLine] then canGather[GATHER_SKILL_LINES[skillLine]] = true end
+            end
+        end
+    end
+    return canGather[kind]
+end
+
+local function SkillsChanged()
+    canGather = nil
+    sparkleGUID = false -- look at the current target again
+end
+
 local function SparkleCheck()
     local guid = UnitGUID and UnitGUID("softinteract")
     if guid and issecretvalue and issecretvalue(guid) then guid = nil end
@@ -1080,7 +1103,7 @@ local function SparkleCheck()
             local name = UnitName("softinteract")
             if type(name) == "string" and not (issecretvalue and issecretvalue(name)) then
                 local kind = NodeType(name)
-                if kind and db[SPARKLE_TYPES[kind]] ~= false then sparkleKind = kind end
+                if kind and db[SPARKLE_TYPES[kind]] ~= false and CanGather(kind) then sparkleKind = kind end
             end
         end
         SetNodeIcon(sparkleKind ~= nil)
@@ -2430,6 +2453,7 @@ events:SetScript("OnEvent", function(_, event, arg1, _, arg3)
     elseif event == "TRADE_SKILL_SHOW" or event == "TRADE_SKILL_LIST_UPDATE" then
         SaveProfessionSoon()
     elseif event == "ZONE_CHANGED_NEW_AREA" or event == "SKILL_LINES_CHANGED" then
+        if event == "SKILL_LINES_CHANGED" then SkillsChanged() end
         -- Zone, skill and lure all change the getaway line.
         if db.fishOn and frame and frame:IsShown() then Refresh() end
     elseif event == "CHAT_MSG_LOOT" then

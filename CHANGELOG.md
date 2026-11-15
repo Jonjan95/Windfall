@@ -2,6 +2,10 @@
 
 All changes to Windfall, newest first. After an update, type `/reload` in game (or restart the game when the notes say so).
 
+## [0.2.19] - 2026-11-15
+
+- **Sparkles only on what you can gather:** herbs need Herbalism, ore needs Mining and fishing pools need Fishing. A character without the profession gets no sparkle or icon for those nodes. Learning a profession counts straight away.
+
 ## [0.2.18] - 2026-11-15
 
 - **No more icons over trainers and vendors while sparkles are on.** Sparkles make soft targeting reach all round you, so every nearby NPC got the game's interact icon. That icon is now off while sparkles are on, unless the nearest thing is a node, and comes back when you switch sparkles off.
