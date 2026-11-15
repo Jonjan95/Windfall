@@ -2,6 +2,12 @@
 
 All changes to Windfall, newest first. After an update, type `/reload` in game (or restart the game when the notes say so).
 
+## [0.2.37] - 2026-11-15
+
+- **Every character shows up as soon as you log in**, with its crafting professions and skill, and the window opens on the character you are playing. Professions whose recipes Windfall has not read yet have a grey icon.
+- **Load from the Levelling tab:** for a profession not read yet, the Levelling tab says so and its button reads *Load Enchanting* (for example). One click opens the profession window; its route appears straight after.
+- When no recipe can be planned yet because nothing has a price, the Levelling tab now says to scan the auction house, instead of "Done".
+
 ## [0.2.36] - 2026-11-15
 
 - **Nothing runs off the bottom of the window any more.** Every tab now fills the window, so "Left to buy" and the status line stay at its bottom, also when you plan further.

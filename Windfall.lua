@@ -28,7 +28,7 @@ local ToggleSettings, RefreshSettings
 local ResetInteract
 local ToggleProfessions, RefreshProfessions, RefreshHeader
 local NewPage, TogglePanel, DockPanel, UndockPanel, PageOpeners
-local PanelHeader, SetPanelHeaderRefresh, SetPanelPortrait, CurrentSelection
+local PanelHeader, SetPanelHeaderRefresh, SetPanelPortrait, CurrentSelection, NoteCharacter, CharacterKeyNow
 local bar, BuildBar, UpdateBar, UpdateBarIcons
 local FISH_ICON, fishingNow, UpdateFishIcon, StartKeyCapture, ReleaseCVars, FishingSkill, OnLureCastStart, OnLureCastSucceeded, OnLureCastEnded
 local UpdateAutoLoot, SetFishing, SetFishKey, OnMainHandChanged, OnCombatEnded, OnChannelStart, OnChannelStop, InitFishing
@@ -2369,11 +2369,40 @@ local function UnsavedProfessions()
     local char = db.chars and db.chars[CharacterKey()]
     for _, index in pairs({ GetProfessions() }) do
         local name, _, _, _, _, _, skillLine = GetProfessionInfo(index)
-        if PROFESSION_SPELLS[skillLine] and not (char and char.professions[name]) then
+        local saved = char and char.professions[name]
+        if PROFESSION_SPELLS[skillLine] and not (saved and not saved.unloaded) then
             list[#list + 1] = { line = skillLine, name = name }
         end
     end
     return list
+end
+
+-- The character you are playing, listed as soon as you log in: its crafting
+-- professions with their skill, read from the game. Their recipes come when
+-- each profession window is opened once (or with Load); until then they are
+-- marked as not loaded.
+function NoteCharacter()
+    if not (db and GetProfessions and GetProfessionInfo) then return end
+    db.chars = db.chars or {}
+    local key = CharacterKey()
+    local char = db.chars[key] or { professions = {} }
+    local _, class = UnitClass("player")
+    char.class = class
+    char.level = UnitLevel and UnitLevel("player")
+    local any = false
+    for _, index in pairs({ GetProfessions() }) do
+        local name, _, rank, maxRank, _, _, skillLine = GetProfessionInfo(index)
+        if PROFESSION_SPELLS[skillLine] and name then
+            any = true
+            local prof = char.professions[name]
+            if prof then
+                prof.skill, prof.max, prof.line = rank or prof.skill, maxRank or prof.max, skillLine
+            else
+                char.professions[name] = { skill = rank, max = maxRank, line = skillLine, recipes = {}, unloaded = true }
+            end
+        end
+    end
+    if any or next(char.professions) then db.chars[key] = char end
 end
 
 local function LoadProfessions()
@@ -2440,6 +2469,7 @@ end
 -- Picks the character and profession to show, falling back to what exists.
 local function CurrentProfession()
     local chars = db.chars or {}
+    if not profView.chosen and chars[CharacterKey()] then profView.char = CharacterKey() end
     if not chars[profView.char] then
         profView.char = chars[CharacterKey()] and CharacterKey() or SortedKeys(chars)[1]
     end
@@ -2970,10 +3000,14 @@ function RefreshProfessions()
 
         .. "* = a reagent has no price."
         .. (#profList > PROF_ROWS and " Scroll for more." or "")
+    if prof.unloaded then
+        hint = "Not loaded yet: open " .. (profView.prof or "this profession") .. " once (or click Load) so Windfall can read its recipes."
+    end
     f.hint:SetText(hint)
 end
 
 function ToggleProfessions()
+    NoteCharacter()
     if not profFrame then profFrame = BuildProfessionsFrame() end
     profFrame:SetShown(not profFrame:IsShown())
     if profFrame:IsShown() then
@@ -3011,9 +3045,14 @@ function CurrentSelection()
     return char, prof, profView
 end
 
+function CharacterKeyNow()
+    return CharacterKey()
+end
+
 -- Picks a character and profession and shows it on the open page.
 local function Choose(charKey, profName)
     profView.char, profView.prof, profView.offset, profView.target = charKey, profName, 0, nil
+    profView.chosen = true -- picked by hand: stay on it
     CurrentProfession()
     if headerPanel and headerPanel:IsShown() then
         if WindfallShoppingFrame and WindfallShoppingFrame:IsShown() then
@@ -3151,6 +3190,9 @@ local function BuildHeader()
             GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
             GameTooltip:AddLine(self.name)
             if prof then GameTooltip:AddLine(string.format("Skill %d / %d", prof.skill or 0, prof.max or 0), 1, 1, 1) end
+            if prof and prof.unloaded then
+                GameTooltip:AddLine("Not loaded yet: open this profession once (or click Load) so Windfall can read its recipes.", 1, 0.6, 0.3, true)
+            end
             GameTooltip:Show()
         end)
         b:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -3204,6 +3246,7 @@ function RefreshHeader(key)
         if b then
             b.name = name
             b.icon:SetTexture(ProfessionIcon(char.professions[name]))
+            b.icon:SetDesaturated(char.professions[name].unloaded and true or false)
             b.ring:SetShown(name == profView.prof)
             b:Show()
         end
@@ -3632,8 +3675,14 @@ end
 local function CraftNow()
     local now = shop.now
     local prof = RouteProfession()
-    if not (now and now.p and prof) then return end
     local T = C_TradeSkillUI
+    -- Not read yet: this click opens the profession window, which saves it.
+    if now and now.load and prof then
+        if T and T.OpenTradeSkill then T.OpenTradeSkill(prof.line) end
+        Status("Opened " .. shop.route.name .. ". Its route appears in a moment.")
+        return
+    end
+    if not (now and now.p and prof) then return end
     if not ProfessionIsOpen(prof.line) then
         if T and T.OpenTradeSkill then T.OpenTradeSkill(prof.line) end
         Status("Opened " .. shop.route.name .. ". Click Craft again.")
@@ -3663,7 +3712,18 @@ function RefreshShoppingList()
     local nowShown = not shop.single and now ~= nil
     f.now:SetShown(nowShown)
     f.craft:Hide()
-    if nowShown and now.rank and now.needLevel then
+    if nowShown and now.load then
+        if now.mine then
+            f.now:SetText("|cffffd100Now:|r open " .. (shop.route and shop.route.name or "the profession")
+                .. " once, so Windfall can read its recipes and plan your route.")
+            f.craft:SetText("Load " .. (shop.route and shop.route.name or ""))
+            f.craft:SetEnabled(true)
+            f.craft:Show()
+        else
+            f.now:SetText("|cffffd100Now:|r log in on this character and open " .. (shop.route and shop.route.name or "the profession")
+                .. " once, so Windfall can read its recipes.")
+        end
+    elseif nowShown and now.rank and now.needLevel then
         f.now:SetText(string.format("|cffff6060Capped at %d.|r %s needs level %d, so the route goes on from there.",
             now.at, now.rank, now.needLevel))
     elseif nowShown and now.rank then
@@ -3683,6 +3743,8 @@ function RefreshShoppingList()
             f.craft:SetEnabled(can > 0)
             f.craft:Show()
         end
+    elseif nowShown and now.gap then
+        f.now:SetText(string.format("|cffff6060No priced recipe from %d.|r Scan the auction house with Auctionator, then come back to this tab.", now.gap))
     elseif nowShown then
         f.now:SetText("|cff7fd36bDone: you reached " .. (shop.route and shop.route.target or "") .. ".|r")
     end
@@ -3939,6 +4001,13 @@ local function FillRoute(keepStatus)
     local prof, r = RouteProfession()
     if not prof then return end
     SyncLearned(prof, r.char)
+    if prof.unloaded then
+        shop.single = false
+        shop.title = string.format("%s %d to %d", r.name, prof.skill or 1, r.target)
+        shop.lines, shop.items = {}, {}
+        shop.now = { load = true, line = prof.line, mine = r.char == (db.chars and CharacterKeyNow and CharacterKeyNow()) }
+        return
+    end
     local char = db.chars and db.chars[r.char]
     local steps, items, trainCost, gaps = BuildRoute(prof, r.target, char and char.level)
     shop.single = false
@@ -3968,7 +4037,10 @@ local function FillRoute(keepStatus)
             end
         end
     end
-    shop.now = shop.now or { finished = true }
+    -- Nothing to do: either the target is reached, or no recipe has prices yet.
+    if not shop.now then
+        shop.now = (prof.skill or 0) >= r.target and { finished = true } or { gap = gaps[1] or prof.skill or 1 }
+    end
     if #steps > #shop.lines then shop.lines[#shop.lines + 1] = "|cff888888... and more steps|r" end
     if gaps[1] then
         -- Added below the steps (or in place of the last one when the list is full).
@@ -4098,6 +4170,7 @@ events:SetScript("OnEvent", function(_, event, arg1, _, arg3)
         Refresh()
         CreateMinimapButton()
         InitFishing()
+        NoteCharacter()
         if db.sparkle then StartSparkles() end
         UpdateFishIcon()
         C_Timer.NewTicker(1, Tick)
@@ -4120,7 +4193,10 @@ events:SetScript("OnEvent", function(_, event, arg1, _, arg3)
     elseif event == "TRADE_SKILL_SHOW" or event == "TRADE_SKILL_LIST_UPDATE" then
         SaveProfessionSoon()
     elseif event == "ZONE_CHANGED_NEW_AREA" or event == "SKILL_LINES_CHANGED" then
-        if event == "SKILL_LINES_CHANGED" then SkillsChanged() end
+        if event == "SKILL_LINES_CHANGED" then
+            SkillsChanged()
+            NoteCharacter()
+        end
         -- Zone, skill and lure all change the getaway line.
         if db.fishOn and frame then Refresh() end
     elseif event == "CHAT_MSG_LOOT" then

@@ -605,5 +605,29 @@ print(rt.eval(r'''(function()
   ev2(nil, "MERCHANT_CLOSED"); MerchantFrame.shown = false; pn("vendor closes")
   B.sparkle.onOnClick(B.sparkle); out[#out+1] = "bar: sparkle click -> sparkle="..tostring(WindfallDB.sparkle).." dim="..tostring(B.sparkle.icon.desat)
   B.sparkle.onOnClick(B.sparkle)
+  -- logging in on a new character (a priest with Enchanting and Tailoring, nothing opened yet)
+  player = "Jonjan"; class = "PRIEST"; playerLevel = 8
+  gatherProfs = { 333, 197 }; profNames = { [333] = "Enchanting", [197] = "Tailoring" }
+  local oldGPI2 = GetProfessionInfo
+  GetProfessionInfo = function(i) local line = gatherProfs[i - 100]; if line then return profNames[line], 1, line == 333 and 12 or 30, 75, 0, 0, line, 0 end return oldGPI2(i) end
+  ev(nil, "SKILL_LINES_CHANGED"); runTimers()
+  local c = WindfallDB.chars["Jonjan-Realm"]
+  out[#out+1] = "priest: listed at login -> "..tostring(c ~= nil).." professions: "..(c and ((c.professions.Enchanting and "Enchanting "..c.professions.Enchanting.skill.." unloaded="..tostring(c.professions.Enchanting.unloaded)) or "-") or "-")
+  if WindfallPanel.shown then WindfallBar.menu.onOnClick(WindfallBar.menu) end
+  WindfallBar.menu.onOnClick(WindfallBar.menu)
+  local H2 = WindfallPanel.header
+  local S2 = WindfallShoppingFrame
+  -- this test session has picked Huntie by hand earlier; pick the priest the same way
+  H2.char.onOnClick(H2.char)
+  for _, r in ipairs(WindfallCharMenu.rows) do if r:IsShown() and r.key == "Jonjan-Realm" then r.onOnClick(r) end end
+  local icons = {}; for _, b in ipairs(H2.icons) do if b:IsShown() then icons[#icons+1] = b.name..(b.icon.desat and "(grey)" or "") end end
+  out[#out+1] = "priest: window -> char="..tostring(H2.char.text).." icons="..table.concat(icons, ",").." route="..tostring(S2.title2.text).." now="..tostring(S2.now.text).." button="..(S2.craft:IsShown() and tostring(S2.craft.text) or "-")
+  openedLines = {}; S2.craft.onOnClick(S2.craft)
+  out[#out+1] = "priest: Load clicked -> opened skill line "..tostring(openedLines[#openedLines]).." | "..tostring(S2.status.text)
+  trade = { name = "Enchanting", id = 333, skill = 12, max = 75, recipes = {
+    [7421] = { name = "Runed Copper Rod", item = 6218, rd = 0, reagents = { {2840, 1}, {10940, 1} } } } }
+  ev(nil, "TRADE_SKILL_SHOW"); runTimers()
+  out[#out+1] = "priest: after the window opened -> route="..tostring(S2.title2.text).." now="..tostring(S2.now.text).." unloaded="..tostring(WindfallDB.chars["Jonjan-Realm"].professions.Enchanting.unloaded)
+  GetProfessionInfo = oldGPI2; player = "Huntie"; class = "HUNTER"
   return table.concat(out, "\n")
 end)()''').replace("|cffffd700g|r","g").replace("|cffc7c7cfs|r","s").replace("|cffeda55fc|r","c"))
