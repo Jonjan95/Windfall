@@ -2,6 +2,10 @@
 
 All changes to Windfall, newest first. After an update, type `/reload` in game (or restart the game when the notes say so).
 
+## [0.2.16] - 2026-11-15
+
+- **No more name plates on guards and vendors while sparkles are on.** The name plate the sparkle sits on is now switched on only while the nearest thing is a herb, ore vein or fishing pool.
+
 ## [0.2.15] - 2026-11-15
 
 The first release on CurseForge. **Restart the game once** after installing, so the icon and key bindings load.

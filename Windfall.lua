@@ -985,7 +985,6 @@ local SPARKLE_CVARS = {
     SoftTargetInteract = "3",
     SoftTargetInteractArc = "2",
     SoftTargetInteractRange = "30",
-    SoftTargetNameplateInteract = "1",
 }
 local sparkleLease = {}
 local sparkleTicker, sparkleGUID, sparkleFrame, iconOn
@@ -998,17 +997,24 @@ local function GetCVarSafe(name)
     return C_CVar and C_CVar.GetCVar and C_CVar.GetCVar(name)
 end
 
--- The game's icon over the soft target, on only while it is a node.
+-- The game's icon over the soft target, and the name plate the sparkle sits
+-- on, are on only while the soft target is a node. Left on, every guard and
+-- vendor you walk past would get a name plate too.
+local NODE_ONLY_CVARS = { "SoftTargetIconGameObject", "SoftTargetNameplateInteract" }
+
 local function SetNodeIcon(on)
     if iconOn == on then return end
-    if not sparkleLease.SoftTargetIconGameObject then
-        local current = GetCVarSafe("SoftTargetIconGameObject")
-        if current == nil then return end
-        sparkleLease.SoftTargetIconGameObject = { original = current }
-    end
     iconOn = on
-    SetCVarSafe("SoftTargetIconGameObject", on and "1" or "0")
-    sparkleLease.SoftTargetIconGameObject.ours = GetCVarSafe("SoftTargetIconGameObject")
+    for _, name in ipairs(NODE_ONLY_CVARS) do
+        if not sparkleLease[name] then
+            local current = GetCVarSafe(name)
+            if current ~= nil then sparkleLease[name] = { original = current } end
+        end
+        if sparkleLease[name] then
+            SetCVarSafe(name, on and "1" or "0")
+            sparkleLease[name].ours = GetCVarSafe(name)
+        end
+    end
 end
 
 local function BuildSparkle()
