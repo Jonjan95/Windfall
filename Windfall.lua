@@ -2475,7 +2475,7 @@ local function BuildProfessionsFrame()
     f.load:SetText("Load my professions")
     f.load:SetScript("OnClick", function() LoadProfessions() end)
     -- Above the recipe rows, which cover the middle of the window.
-    f.load:SetFrameLevel(f:GetFrameLevel() + 10)
+    f.load:SetFrameLevel((f:GetFrameLevel() or 1) + 10)
     return f
 end
 
