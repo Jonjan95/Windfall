@@ -504,6 +504,13 @@ print(rt.eval(r'''(function()
   -- learned at the trainer while the window is open (profession window not opened since)
   knownSpells[2153] = true; bags[2320] = 100
   ev2(S, "NEW_RECIPE_LEARNED", 2153); runTimers(); g("learned Handstitched Leather Pants at the trainer")
+  -- at 50 with cap 75, then journeyman trained (cap 150), read live from the game
+  gatherProfs = { 165 }; profNames = { [165] = "Leatherworking" }; lwRank, lwMax = 50, 75
+  local oldGPI = GetProfessionInfo
+  GetProfessionInfo = function(i) if i == 101 then return "Leatherworking", 1, lwRank, lwMax, 0, 0, 165, 0 end return oldGPI(i) end
+  ev2(S, "SKILL_LINES_CHANGED"); runTimers(); g("skill 50, cap 75")
+  lwMax = 150; ev2(S, "SKILL_LINES_CHANGED"); runTimers(); g("journeyman trained, cap 150")
+  GetProfessionInfo = oldGPI; gatherProfs = { 182, 186 }
   -- forget needs shift, load brings it back
   local P = WindfallProfessionsFrame
   if WindfallShoppingFrame then WindfallShoppingFrame:Hide() end

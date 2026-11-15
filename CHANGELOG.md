@@ -2,6 +2,10 @@
 
 All changes to Windfall, newest first. After an update, type `/reload` in game (or restart the game when the notes say so).
 
+## [0.2.30] - 2026-11-15
+
+- **The route no longer stops at a rank you have already trained.** It reads your skill and skill cap straight from the game, so training Journeyman (or any skill-up) moves the route on right away, without opening the profession window.
+
 ## [0.2.29] - 2026-11-15
 
 - **Accurate skill-up chances.** Windfall now knows when every trainer recipe turns yellow and grey, taken from the game's own recipe data for Forever. A recipe gives a point every time while orange, then less and less until it goes grey, and the plan shows that chance (for example "Light Leather 50%").

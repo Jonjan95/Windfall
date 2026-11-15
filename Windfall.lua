@@ -2248,7 +2248,18 @@ end
 -- last read: the game knows them as spells, so they count as known right away,
 -- with a guessed colour until the profession window says better.
 function SyncLearned(prof, charKey)
-    if not (prof and prof.line and IsPlayerSpell) or charKey ~= CharacterKey() then return false end
+    if not (prof and prof.line) or charKey ~= CharacterKey() then return false end
+    -- Skill and cap as the game has them now: training a rank or a skill-up
+    -- shows here without opening the profession window.
+    if GetProfessions and GetProfessionInfo then
+        for _, index in pairs({ GetProfessions() }) do
+            local _, _, rank, maxRank, _, _, skillLine = GetProfessionInfo(index)
+            if skillLine == prof.line and rank then
+                prof.skill, prof.max = rank, maxRank or prof.max
+            end
+        end
+    end
+    if not IsPlayerSpell then return false end
     local added = false
     for _, entry in ipairs(ns.TrainerRecipes[prof.line] or {}) do
         local spell = entry[1]
@@ -2677,7 +2688,7 @@ do
 -- skill point at a time, always taking the cheapest recipe per point. Recipe
 -- colours along the way are guessed from each recipe's unlock skill, so the
 -- craft counts are an estimate; the plan itself recalculates as you level.
-local RANK_AT = { { 50, "Journeyman" }, { 125, "Expert" }, { 200, "Artisan" } }
+local RANK_AT = { { 50, "Journeyman", 150 }, { 125, "Expert", 225 }, { 200, "Artisan", 300 } }
 ROUTE_TARGETS = { 75, 150, 225, 300 }
 
 function RouteTarget(skill)
@@ -2713,9 +2724,16 @@ local function BuildRoute(prof, target)
 
     local steps, crafts, trained, gaps = {}, {}, {}, {}
     local current
+    local cap = prof.max or 0
     for level = skill, target - 1 do
+        -- The next rank, from the skill it can be trained at; ranks already
+        -- trained (your cap is already that high) are skipped.
         for _, r in ipairs(RANK_AT) do
-            if level == r[1] then steps[#steps + 1] = { rank = r[2], at = level } current = nil end
+            if level >= r[1] and r[3] > cap and r[3] <= cap + 75 then
+                steps[#steps + 1] = { rank = r[2], at = level }
+                current = nil
+                cap = r[3]
+            end
         end
         -- The cheapest point among recipes with a good chance; a poor chance
         -- only when nothing better is left at this skill.
