@@ -2,6 +2,16 @@
 
 All changes to Windfall, newest first. After an update, type `/reload` in game (or restart the game when the notes say so).
 
+## [0.2.40] - 2026-11-15
+
+- **Cleaner Windfall page in the profession window:**
+  - The window's own pages (like the overview's skill bars) no longer show through. They come back when you click one of the game's tabs.
+  - **Recipes** and **Levelling** are tabs under the window, like the game's own.
+  - The header has a character button with a drop-down arrow in the class colour, framed profession icons (hover for skill), and a framed skill bar that fills the rest of the row.
+  - The recipe list sits in its own box with a scroll bar. Categories collapse with +/-; while you search, every category stays open.
+  - The recipe shows its reagents in two columns with have/need on the icon (red when short) and what other characters hold. Below them: To craft, Sells for, Profit and Skill-up, then Create All and Create.
+- **Reagents for every recipe.** Recipes counted as learned before their profession window was read showed no reagents (and a cost of 0). Windfall now reads them from the game.
+
 ## [0.2.39] - 2026-11-15
 
 - **Windfall inside the game's profession window.** A Windfall tab now sits with the profession tabs on the right side of the profession window. Click it and the window shows Windfall's page in the window's own layout:
