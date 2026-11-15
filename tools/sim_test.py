@@ -93,7 +93,7 @@ cvars.autoLootDefault = "0"
 skill = nil faction = "Alliance" UISpecialFrames = {}
 gatherProfs = { 182, 186 } -- Herbalism, Mining
 function GetProfessions() return gatherProfs[1] and 101 or nil, gatherProfs[2] and 102 or nil, nil, skill and 1 or nil end
-function GetProfessionInfo(i) if i == 1 then return "Fishing", 1, skill[1], skill[2], 0, 0, 356, skill[3] end return "Gathering", 1, 1, 300, 0, 0, gatherProfs[i - 100], 0 end
+function GetProfessionInfo(i) if i == 1 then return "Fishing", 1, skill[1], skill[2], 0, 0, 356, skill[3] end local line = gatherProfs[i - 100]; return (profNames and profNames[line]) or "Gathering", 1, 1, 300, 0, 0, line, 0 end
 function UnitFactionGroup() return faction end
 soft = nil plateMissing = false sparkleShown = false
 function UnitGUID(u) if u == "softinteract" and soft then return soft.guid end end
@@ -469,9 +469,12 @@ print(rt.eval(r'''(function()
   for k in pairs(WindfallDB.chars) do WindfallDB.chars[k] = nil end
   RefreshForTest = true; P.modeButton.onOnClick(P.modeButton); P.modeButton.onOnClick(P.modeButton)
   out[#out+1] = "load: everything forgotten -> ["..tostring(P.charButton.text).."] load button shown="..tostring(P.load:IsShown()).." hint="..tostring(P.hint.text)
-  gatherProfs = { 165 }; openedLines = {}
+  gatherProfs = { 165, 197 }; openedLines = {}; profNames = { [165] = "Leatherworking", [197] = "Tailoring" }
+  P.modeButton.onOnClick(P.modeButton); P.modeButton.onOnClick(P.modeButton)
+  out[#out+1] = "load: two professions, none saved -> button '"..tostring(P.load.text).."'"
   P.load.onOnClick(P.load)
-  for _ = 1, 5 do runTimers() end
-  out[#out+1] = "load: opened skill lines "..table.concat(openedLines, ",").." closed="..tostring(closedTrade).." -> ["..tostring(P.charButton.text).."] ["..tostring(P.profButton.text).."] load button shown="..tostring(P.load:IsShown())
+  out[#out+1] = "load: click opened skill lines "..table.concat(openedLines, ",").." closed="..tostring(closedTrade).." timers waiting="..#timers
+  ev(nil, "TRADE_SKILL_SHOW"); runTimers()
+  out[#out+1] = "load: Leatherworking saved -> ["..tostring(P.charButton.text).."] ["..tostring(P.profButton.text).."] load button shown="..tostring(P.load:IsShown()).." '"..tostring(P.load.text).."'"
   return table.concat(out, "\n")
 end)()''').replace("|cffffd700g|r","g").replace("|cffc7c7cfs|r","s").replace("|cffeda55fc|r","c"))

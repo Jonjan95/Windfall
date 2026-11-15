@@ -2,6 +2,10 @@
 
 All changes to Windfall, newest first. After an update, type `/reload` in game (or restart the game when the notes say so).
 
+## [0.2.25] - 2026-11-15
+
+- **Load no longer causes an "action blocked" error.** The game only lets an addon open a profession window on a real click, so the Load button now opens one profession per click ("Load Leatherworking", then "Load Tailoring") and leaves the window open for you to close. It also shows next to Route while a profession of this character is still to load.
+
 ## [0.2.24] - 2026-11-15
 
 - **Load my professions can be clicked now.** The empty recipe rows lay on top of it.

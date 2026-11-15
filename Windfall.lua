@@ -2060,51 +2060,34 @@ function SaveProfessionSoon()
     end)
 end
 
--- Opens each of this character's crafting professions in turn, saves it,
--- and closes the window again: one click instead of opening them by hand.
-local loading = false
+-- This character's crafting professions that Windfall has not saved yet.
+-- Opening a profession window is only allowed on a real click, so the Load
+-- button opens one per click; saving then happens as for any window you open.
+local function UnsavedProfessions()
+    local list = {}
+    if not (GetProfessions and GetProfessionInfo) then return list end
+    local char = db.chars and db.chars[CharacterKey()]
+    for _, index in pairs({ GetProfessions() }) do
+        local name, _, _, _, _, _, skillLine = GetProfessionInfo(index)
+        if PROFESSION_SPELLS[skillLine] and not (char and char.professions[name]) then
+            list[#list + 1] = { line = skillLine, name = name }
+        end
+    end
+    return list
+end
 
 local function LoadProfessions()
     local T = C_TradeSkillUI
-    if loading then return end
-    if not (T and T.OpenTradeSkill) then
-        print("|cff7fd36bWindfall|r: open each profession window once and it is saved.")
+    local nextOne = UnsavedProfessions()[1]
+    if not nextOne then
+        print("|cff7fd36bWindfall|r: this character's professions are all loaded.")
         return
     end
-    if InCombatLockdown and InCombatLockdown() then
-        print("|cff7fd36bWindfall|r: professions can be loaded once you are out of combat.")
+    if not (T and T.OpenTradeSkill) or (InCombatLockdown and InCombatLockdown()) then
+        print("|cff7fd36bWindfall|r: open your " .. nextOne.name .. " window and it is saved.")
         return
     end
-    local queue = {}
-    if GetProfessions and GetProfessionInfo then
-        for _, index in pairs({ GetProfessions() }) do
-            local skillLine = select(7, GetProfessionInfo(index))
-            if PROFESSION_SPELLS[skillLine] then queue[#queue + 1] = skillLine end
-        end
-    end
-    if not queue[1] then
-        print("|cff7fd36bWindfall|r: this character has no crafting profession to load.")
-        return
-    end
-    loading = true
-    local i = 0
-    local function NextProfession()
-        i = i + 1
-        if i > #queue then
-            loading = false
-            if T.CloseTradeSkill then pcall(T.CloseTradeSkill) end
-            print(string.format("|cff7fd36bWindfall|r: loaded %d profession%s.", #queue, #queue == 1 and "" or "s"))
-            if RefreshProfessions then RefreshProfessions() end
-            return
-        end
-        pcall(T.OpenTradeSkill, queue[i])
-        -- Give the recipe list time to arrive, then save it.
-        C_Timer.After(2, function()
-            SaveProfession()
-            NextProfession()
-        end)
-    end
-    NextProfession()
+    T.OpenTradeSkill(nextOne.line)
 end
 
 -- What it costs to get one of a reagent: the cheaper of the auction house
@@ -2515,14 +2498,27 @@ function RefreshProfessions()
             row:EnableMouse(false)
             row.name:SetText("") row.cost:SetText("") row.value:SetText("") row.profit:SetText("")
         end
-        f.hint:SetText("Click Load my professions, or open a profession window on any character, and it is saved here.")
-        f.load:Show()
+        local pending = UnsavedProfessions()[1]
+        f.hint:SetText(pending and "Click Load, or open a profession window on any character, and it is saved here."
+            or "This character has no crafting profession. Open a profession window on another character and it is saved here.")
+        f.load:ClearAllPoints()
+        f.load:SetPoint("CENTER", 0, 0)
+        f.load:SetSize(180, 24)
+        f.load:SetText(pending and ("Load " .. pending.name) or "")
+        f.load:SetShown(pending ~= nil)
         f.forget:Hide()
         f.route:Hide()
         return
     end
     f.forget:Show()
-    f.load:Hide()
+    -- A profession of this character still to load: a small Load button.
+    local pending = UnsavedProfessions()[1]
+    f.load:ClearAllPoints()
+    f.load:SetPoint("BOTTOMRIGHT", -242, 10)
+    f.load:SetSize(110, 20)
+    f.load:SetText(pending and ("Load " .. pending.name) or "")
+    f.load:SetShown(pending ~= nil)
+    f.hint:SetWidth(PROF_WIDTH - (pending and 370 or 250))
     if profView.target and profView.target <= (prof.skill or 1) then profView.target = nil end
     f.route:SetText("Route to " .. (profView.target or RouteTarget(prof.skill or 1)))
     f.route:SetShown(profView.mode == "plan")
