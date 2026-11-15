@@ -2,6 +2,17 @@
 
 All changes to Windfall, newest first. After an update, type `/reload` in game (or restart the game when the notes say so).
 
+## [0.2.34] - 2026-11-15
+
+**One bar and one panel instead of many windows.**
+
+- **The bar** stays on screen with your gold per hour and session time, a fish switch for the fishing key, a flower switch for node sparkles, and the Windfall icon. Drag it where you like.
+- **The panel** replaces the separate windows. The Windfall icon, the minimap button or `/wf` opens it on the page you used last, and the menu along its top switches between Farming, Zones, Professions, Route and Settings.
+- **At the auction house or a vendor** the panel docks next to it on the Route page when there is something there to buy, and goes back to its own spot afterwards (closing again if it only opened for that).
+- **Every crafting profession:** Cooking and First Aid get their Expert rank from a vendor book and Artisan from a quest, and the route now says so instead of "train". Enchanting crafts remind you to click the item to enchant.
+- "No priced recipe" no longer hides the route's last step.
+- The bar and the panel start where they like the first time; move them once and they stay.
+
 ## [0.2.33] - 2026-11-15
 
 - **Enough materials for unlucky skill-ups.** Yellow and green crafts give a point only some of the time, and the route used to buy for the average number of crafts, so about half the time you ran short. It now adds a spare worked out from each step's chance, enough about five times out of six. Orange crafts never miss and get no spare.

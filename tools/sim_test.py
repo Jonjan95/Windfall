@@ -47,6 +47,7 @@ local function widget()
     if k=="AddLine" then return function(s,t) tipLines[#tipLines+1]=tostring(t) end end
     if k=="AddDoubleLine" then return function(s,a,b) tipLines[#tipLines+1]=tostring(a).." = "..tostring(b) end end
     if k=="SetEnabled" then return function(s,v) s.enabled=v end end
+    if k=="SetDesaturated" then return function(s,v) s.desat=v end end
     if k=="SetHeight" then return function(s,x) s.h=x end end
     return function() end
   end})
@@ -454,6 +455,7 @@ print(rt.eval(r'''(function()
     for i = 1, 6 do local r = S.rows[i]; if r:IsShown() then out[#out+1] = "      mat "..r.name.text.." | "..r.need.text.." | "..r.total.text.." | buy="..(r.buy:IsShown() and r.buy.text or "-") end end
   end
   sh("route opened, not at the AH")
+  if not P:IsShown() then SlashCmdList.WINDFALL("prof") end -- one page at a time: back to Professions
   P.route.onOnClick(P.route, "RightButton"); out[#out+1] = "route: right-click target -> "..P.route.text
   -- events go to every addon frame, as in the game
   ev2 = function(_, e, ...) for _, h in ipairs(handlers) do h(nil, e, ...) end end
@@ -539,10 +541,20 @@ print(rt.eval(r'''(function()
   local function steps(label) out[#out+1] = "rank: "..label.." -> "..tostring(S.title2.text).." | now: "..tostring(S.now.text); for i = 1, 8 do local t = S.lines[i].text; if t and t ~= "" then out[#out+1] = "      step "..t end end end
   steps("level 10, too low for Expert")
   playerLevel = 20; ev2(S, "SKILL_LINES_CHANGED"); runTimers(); steps("level 20")
+  -- cooking book rank: Expert comes from a vendor book at 125
+  trade = { name = "Cooking", id = 185, skill = 125, max = 150, recipes = {
+    [2541] = { name = "Coyote Steak", item = 2684, rd = 1, reagents = { {2673, 1} } } } }
+  ev(nil, "TRADE_SKILL_LIST_UPDATE"); runTimers()
+  local PF2 = WindfallProfessionsFrame
+  if not PF2:IsShown() then SlashCmdList.WINDFALL("prof") end
+  while PF2.profButton.text ~= "Cooking" do PF2.profButton.onOnClick(PF2.profButton) end
+  PF2.route.onOnClick(PF2.route, "LeftButton")
+  out[#out+1] = "cook: "..tostring(S.title2.text).." | now: "..tostring(S.now.text)
+  for i = 1, 4 do local t = S.lines[i].text; if t and t ~= "" then out[#out+1] = "      step "..t end end
   GetProfessionInfo = oldGPI; gatherProfs = { 182, 186 }
   -- forget needs shift, load brings it back
   local P = WindfallProfessionsFrame
-  if WindfallShoppingFrame then WindfallShoppingFrame:Hide() end
+  if not P:IsShown() then SlashCmdList.WINDFALL("prof") end -- one page at a time: back to Professions
   P.forget.onOnClick(P.forget)
   out[#out+1] = "load: plain click on Forget -> popup shown? "..tostring(forgetShown == true).." char="..tostring(P.charButton.text)
   shiftDown = true; P.forget.onOnClick(P.forget); shiftDown = false
@@ -557,5 +569,28 @@ print(rt.eval(r'''(function()
   out[#out+1] = "load: click opened skill lines "..table.concat(openedLines, ",").." closed="..tostring(closedTrade).." timers waiting="..#timers
   ev(nil, "TRADE_SKILL_SHOW"); runTimers()
   out[#out+1] = "load: Leatherworking saved -> ["..tostring(P.charButton.text).."] ["..tostring(P.profButton.text).."] load button shown="..tostring(P.load:IsShown()).." '"..tostring(P.load.text).."'"
+  -- the bar and the panel
+  local B, PN = WindfallBar, WindfallPanel
+  local function pn(label)
+    local cur = "none"
+    for _, n in ipairs({ "WindfallFrame", "WindfallHistoryFrame", "WindfallProfessionsFrame", "WindfallShoppingFrame", "WindfallSettingsFrame" }) do
+      if _G[n] and _G[n]:IsShown() then cur = n end
+    end
+    out[#out+1] = "panel: "..label.." -> panel shown="..tostring(PN.shown).." page="..cur
+  end
+  out[#out+1] = "bar: rate='"..tostring(B.rate.text).."' time='"..tostring(B.time.text).."' fish dim="..tostring(B.fish.icon.desat).." sparkle dim="..tostring(B.sparkle.icon.desat)
+  if PN.shown then B.menu.onOnClick(B.menu) end
+  pn("closed")
+  B.menu.onOnClick(B.menu); pn("Windfall icon on the bar")
+  for _, b in ipairs(PN.nav) do if b.key == "zones" then b.onOnClick(b) end end; pn("menu: Zones")
+  for _, b in ipairs(PN.nav) do if b.key == "settings" then b.onOnClick(b) end end; pn("menu: Settings")
+  B.money.onOnClick(B.money, "LeftButton"); pn("gold per hour on the bar")
+  B.menu.onOnClick(B.menu); pn("Windfall icon again")
+  -- at a vendor with the panel closed: it opens next to the vendor, and closes again after
+  merchant = { 2320 }; MerchantFrame.shown = true; bags[2320] = 0
+  ev2(nil, "MERCHANT_SHOW"); pn("vendor opens (route has thread to buy)")
+  ev2(nil, "MERCHANT_CLOSED"); MerchantFrame.shown = false; pn("vendor closes")
+  B.sparkle.onOnClick(B.sparkle); out[#out+1] = "bar: sparkle click -> sparkle="..tostring(WindfallDB.sparkle).." dim="..tostring(B.sparkle.icon.desat)
+  B.sparkle.onOnClick(B.sparkle)
   return table.concat(out, "\n")
 end)()''').replace("|cffffd700g|r","g").replace("|cffc7c7cfs|r","s").replace("|cffeda55fc|r","c"))

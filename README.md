@@ -2,26 +2,42 @@
 
 # Windfall
 
-A World of Warcraft Forever addon that shows what your farming is worth: the value of what you gather or loot, priced with Auctionator's scans, and your gold per hour. It also has a one-button fishing key you can switch on and off.
+A World of Warcraft Forever addon for making and spending gold well: what your farming is worth per hour, priced with Auctionator's scans; a guided, priced route to level any crafting profession, with buying and crafting from the same window; and a one-button fishing key.
 
-## Gold per hour
+## Getting around
 
-- **Two views:** *Gathering* counts only herbs, ore, skins and fish (mob loot does not pull your rate down). *All loot* counts everything you loot, plus coins. Switch with the button in the window or a right-click on the minimap button; nothing is lost when you switch.
+- **The bar** stays on screen: your gold per hour and session time, a fish switch (fishing key on or off, right-click to choose the key), a flower switch (node sparkles on or off), and the Windfall icon. Drag it wherever you like.
+- **The panel** opens from the Windfall icon on the bar, the minimap button or `/wf`. It has one page at a time, picked from the menu along the top: **Farming**, **Zones**, **Professions**, **Route** and **Settings**. It opens on the page you used last.
+- **At the auction house or a vendor**, the panel docks next to it on the Route page when there is something on your list to buy there, and goes back to its own spot afterwards.
+
+## Farming
+
+- **Two views:** *Gathering* counts only herbs, ore, skins and fish (mob loot does not pull your rate down). *All loot* counts everything you loot, plus coins. Switch on the Farming page or by right-clicking the gold per hour on the bar; nothing is lost when you switch.
 - **Prices:** Auctionator's last scanned price, or the vendor price when that is higher or the item was never scanned.
-- **Calm numbers:** the window redraws when you loot something or once a minute.
-- **Zone history:** Reset saves the session per zone. The Zones window ranks zones by gold per hour, so you can tell which spot is worth farming.
+- **Calm numbers:** updated when you loot something or once a minute.
+- **Zones:** Reset saves the session per zone. The Zones page ranks zones by gold per hour, so you can tell which spot is worth farming.
 
 ## Professions
 
-The anvil icon in the title bar (or `/wf prof`) opens a window with every recipe a character knows: what the reagents cost (the cheaper of the auction house and a vendor), what the result sells for after the 5% auction house cut, and the profit. The *Levelling plan* lists the cheapest way up from your current skill, mixing the recipes you know with the ones the trainer can teach you now, and shows the next rank and the recipes that unlock next. Click a recipe for a shopping list: what to buy for a number of crafts, less what is in your bags. *Route to 150* (right-click for another target) works out every step up to the target and all the materials for it. At the auction house the shopping list docks next to it with a Show button per material: it opens that item's page in the auction house with the amount you still need filled in, and you press Buy Now there. At a vendor that sells something on the list, it gets a Buy button (and *Buy all here*) instead. A route also shows the step to do now with a Craft button, and moves on as your skill goes up. Recipes are saved when you open a profession window, on every character, so alts show up too.
+Every recipe a character knows, on every character you play: what the reagents cost (the cheaper of the auction house and a vendor), what the result sells for after the 5% auction house cut, and the profit. Recipes are saved when you open a profession window, or with the Load button.
 
-Trainer recipe data comes from **What's Training?** by Sveng (MIT licence, see `Data/THIRD_PARTY.md`); `tools/import_recipes.py` rebuilds it.
+The **Levelling plan** lists the cheapest way up from your skill. It mixes the recipes you know with the ones the trainer can teach you now and ranks them by what a skill point costs, using each recipe's real skill-up chance from the game's own data (a point every time while orange, less and less until grey). Sure points come first; low-chance crafts only when nothing better is left.
+
+**Route to 150** (right-click for another target) plays that forward: every step up to the target, the ranks to train on the way (or the book or quest for Cooking and First Aid, and a note when your level is too low), and all the materials with a spare for unlucky skill-ups. On the Route page:
+
+- **Now:** the step to do, with a **Craft** button. It moves on by itself as your skill goes up, when you learn a recipe and when you train a rank.
+- **At the auction house:** **Show** opens a material's page in the auction house with the amount you still need filled in; you press Buy Now there.
+- **At a vendor:** **Buy** buys what you still need of anything the vendor sells, and **Buy all here** buys all of it at once.
+
+Works for Alchemy, Blacksmithing, Cooking, Enchanting, Engineering, First Aid, Leatherworking and Tailoring.
+
+Trainer recipe data comes from **What's Training?** by Sveng (MIT licence) and skill-up levels from the game's own recipe table; see `Data/THIRD_PARTY.md`. `tools/import_recipes.py` rebuilds the recipe list.
 
 ## Node sparkles
 
-Switched on in the settings, the nearest herb, ore vein or fishing pool close by gets a sparkle and the game's gather icon. Quest objects, chests and NPCs get nothing. Each kind can be switched off on its own.
+Switched on from the bar or the settings, the nearest herb, ore vein or fishing pool you can gather gets a sparkle and the game's gather icon. Quest objects, chests and NPCs get nothing. Each kind can be switched off on its own. The game only picks up nodes within about 15 yards.
 
-When Windfall is done with the interact key (the line comes in, or sparkles are switched off), it puts it back to the game's defaults: 10 yards, in front of you. The rest of the time it leaves the interact settings alone, so other addons can set them as they like. This is a setting too.
+When Windfall is done with the interact key (the line comes in, or sparkles are switched off), it puts it back to the game's defaults: 10 yards, in front of you. The rest of the time it leaves the interact settings alone, so other addons can set them as they like.
 
 ## Fishing key
 
@@ -31,24 +47,22 @@ When Windfall is done with the interact key (the line comes in, or sparkles are 
 - **Louder splash:** sound effects to full and music and ambience to a quarter while the line is out.
 - **Also:** double right-click to cast, auto loot while fishing, switches off after 10 idle minutes, and a line telling you how many fish get away in the zone you are in.
 
-Every option is a checkbox in the settings window (the gear icon in the title bar).
+Every option is a checkbox on the Settings page.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `/wf` | Show or hide the window |
-| `/wf settings` | Settings window |
-| `/wf zones` | Zone history |
+| `/wf` | Open or close the panel |
+| `/wf settings`, `/wf zones`, `/wf prof` | Open a page |
 | `/wf gather`, `/wf loot` | Switch view |
 | `/wf start`, `/wf pause` | Start or pause the clock |
 | `/wf reset` | Save the session to the zone history and start over (`/wf discard` throws it away) |
 | `/wf fish` | Fishing key on or off |
 | `/wf fishkey` | Choose the fishing key |
 | `/wf sparkle` | Node sparkles on or off |
-| `/wf prof` | Professions window |
 
-Key bindings for the fishing switch, node sparkles and the window are under Options > Keybindings > AddOns > Windfall.
+Key bindings for the fishing switch, node sparkles and the panel are under Options > Keybindings > AddOns > Windfall.
 
 ## Development
 

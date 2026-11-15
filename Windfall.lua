@@ -11,7 +11,8 @@ ns.TrainerRecipes = ns.TrainerRecipes or {}
 local ReadRecipe, SkillLineOf, ShowShoppingList, ShowRoute, SaveProfessionSoon
 local ApplySparkles, StartSparkles, StopSparkles, SkillsChanged, GetawayText, SparkleRecheck
 local MAX_ROWS = 14
-local WIDTH = 290
+local WIDTH = 340
+local FARM_TOP = 64 -- where the loot list starts on the farming page
 local ROW_H = 16
 local COIN_ICON = 133784
 local MODE_LABEL = { gather = "Gathering", loot = "All loot" }
@@ -26,6 +27,8 @@ local Refresh, RefreshHistory, ToggleHistory
 local ToggleSettings, RefreshSettings
 local ResetInteract
 local ToggleProfessions, RefreshProfessions
+local NewPage, TogglePanel, DockPanel, UndockPanel, PageOpeners
+local bar, BuildBar, UpdateBar, UpdateBarIcons
 local FISH_ICON, fishingNow, UpdateFishIcon, StartKeyCapture, ReleaseCVars, FishingSkill, OnLureCastStart, OnLureCastSucceeded, OnLureCastEnded
 local UpdateAutoLoot, SetFishing, SetFishKey, OnMainHandChanged, OnCombatEnded, OnChannelStart, OnChannelStop, InitFishing
 
@@ -274,7 +277,7 @@ end
 local function Tick()
     if not running then return end
     Advance()
-    if math.floor(db.elapsed / 60) ~= shownMinute and frame and frame:IsShown() then
+    if math.floor(db.elapsed / 60) ~= shownMinute and frame then
         Refresh()
     end
 end
@@ -944,7 +947,7 @@ end
 
 BINDING_HEADER_WINDFALL = "Windfall"
 BINDING_NAME_WINDFALL_FISHTOGGLE = "Fishing key on / off"
-BINDING_NAME_WINDFALL_WINDOW = "Show or hide the window"
+BINDING_NAME_WINDFALL_WINDOW = "Open or close the panel"
 BINDING_NAME_WINDFALL_SPARKLE = "Node sparkles on / off"
 
 end
@@ -1186,6 +1189,7 @@ function Windfall_ToggleSparkles()
     if not db then return end
     db.sparkle = not db.sparkle
     ApplySparkles()
+    if UpdateBarIcons then UpdateBarIcons() end
     print("|cff7fd36bWindfall|r: node sparkles " .. (db.sparkle and "on" or "off") .. ".")
     if RefreshSettings then RefreshSettings() end
 end
@@ -1238,114 +1242,200 @@ function SparkleRecheck()
 end
 end
 
--- ------------------------------------------------------------------- UI ----
+-- ---------------------------------------------------------------- panel ----
 
-local function BuildFrame()
-    local f = CreateFrame("Frame", "WindfallFrame", UIParent, "BackdropTemplate")
-    f:SetSize(WIDTH, 100)
-    f:SetFrameStrata("MEDIUM")
+-- One window for everything: a page menu along the top (Farming, Zones,
+-- Professions, Route, Settings) and one page shown at a time. Each page is
+-- built by its own section as before; showing or hiding a page shows the
+-- panel on that page, so the rest of Windfall needs no changes.
+do
+local panel, current
+local pages, byKey = {}, {}
+local docked, placed, openedForDock = false, false, false
+local switching = false
+local HEADER = 24       -- the panel's title and menu sit above each page's own layout
+local MIN_WIDTH = 340
+local NAV = {
+    { key = "farming", label = "Farming" },
+    { key = "zones", label = "Zones" },
+    { key = "professions", label = "Professions" },
+    { key = "route", label = "Route" },
+    { key = "settings", label = "Settings" },
+}
+PageOpeners = {}
+
+-- The plain frame methods, for pages whose Show and Hide are replaced below.
+local probe = CreateFrame("Frame")
+local methods = getmetatable(probe).__index
+local function Method(name)
+    if type(methods) == "table" then return methods[name] end
+    return methods(probe, name)
+end
+local rawShow, rawHide, rawIsShown = Method("Show"), Method("Hide"), Method("IsShown")
+
+local function Resize()
+    if not (panel and current) then return end
+    panel:SetSize(math.max(current:GetWidth() or MIN_WIDTH, MIN_WIDTH), (current:GetHeight() or 200) + HEADER)
+end
+
+local function PlacePanel()
+    panel:ClearAllPoints()
+    local pos = db.panelPos
+    if pos then
+        panel:SetPoint(pos[1], UIParent, pos[2], pos[3], pos[4])
+    else
+        panel:SetPoint("CENTER", UIParent, "CENTER", 0, 60)
+    end
+end
+
+local function BuildPanel()
+    local f = CreateFrame("Frame", "WindfallPanel", UIParent, "BackdropTemplate")
+    f:SetSize(MIN_WIDTH, 200)
+    f:SetFrameStrata("HIGH")
     f:SetClampedToScreen(true)
     f:SetMovable(true)
     f:EnableMouse(true)
     f:RegisterForDrag("LeftButton")
+    f:SetScript("OnDragStart", f.StartMoving)
+    f:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        if not docked then
+            local point, _, relPoint, x, y = self:GetPoint(1)
+            db.panelPos = { point, relPoint, x, y }
+        end
+    end)
     f:SetBackdrop({
         bgFile = "Interface\\Buttons\\WHITE8x8",
         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
         edgeSize = 12,
         insets = { left = 3, right = 3, top = 3, bottom = 3 },
     })
-    f:SetBackdropColor(0, 0, 0, 0.8)
+    f:SetBackdropColor(0, 0, 0, 0.9)
     f:SetBackdropBorderColor(0.4, 0.7, 0.3, 1)
 
-    local pos = db.pos
-    if pos then
-        f:SetPoint(pos[1], UIParent, pos[2], pos[3], pos[4])
-    else
-        f:SetPoint("RIGHT", UIParent, "RIGHT", -120, 0)
-    end
-    f:SetScript("OnDragStart", f.StartMoving)
-    f:SetScript("OnDragStop", function(self)
-        self:StopMovingOrSizing()
-        local point, _, relPoint, x, y = self:GetPoint(1)
-        db.pos = { point, relPoint, x, y }
-    end)
-
     f.title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    f.title:SetPoint("TOPLEFT", 10, -9)
-    f.title:SetText("|cff7fd36bWindfall|r")
-
-    f.time = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    f.time:SetPoint("LEFT", f.title, "RIGHT", 8, 0)
-
+    f.title:SetPoint("TOPLEFT", 12, -9)
     local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
     close:SetPoint("TOPRIGHT", 1, 1)
-    close:SetScript("OnClick", function() f:Hide() db.hidden = true end)
+    close:SetScript("OnClick", function() f:Hide() end)
 
-    -- Fishing key switch: lit while the key is taken over for fishing.
-    f.fish = CreateFrame("Button", nil, f)
-    f.fish:SetSize(18, 18)
-    f.fish:SetPoint("TOPRIGHT", -28, -6)
-    f.fish:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-    f.fish.icon = f.fish:CreateTexture(nil, "ARTWORK")
-    f.fish.icon:SetAllPoints()
-    f.fish.icon:SetTexture(FISH_ICON)
-    f.fish.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
-    f.fish:SetScript("OnClick", function(_, button)
-        if button == "RightButton" then
-            StartKeyCapture()
-        else
-            Windfall_ToggleFishing()
-        end
-    end)
+    -- The page menu.
+    f.nav = {}
+    local x = 10
+    for _, item in ipairs(NAV) do
+        local b = CreateFrame("Button", nil, f)
+        b:SetHeight(16)
+        b.text = b:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        b.text:SetPoint("LEFT")
+        b.text:SetText(item.label)
+        b:SetWidth((b.text:GetStringWidth() or 50) + 4)
+        b:SetPoint("TOPLEFT", x, -28)
+        x = x + (b:GetWidth() or 54) + 10
+        b:SetFrameLevel((f:GetFrameLevel() or 1) + 20)
+        b:SetScript("OnClick", function()
+            local open = PageOpeners[item.key]
+            if open then open() end
+        end)
+        b.key = item.key
+        f.nav[#f.nav + 1] = b
+    end
+    if UISpecialFrames then table.insert(UISpecialFrames, "WindfallPanel") end -- Escape closes it
+    f:Hide()
+    return f
+end
 
-    -- Settings.
-    f.gear = CreateFrame("Button", nil, f)
-    f.gear:SetSize(18, 18)
-    f.gear:SetPoint("RIGHT", f.fish, "LEFT", -4, 0)
-    f.gear.icon = f.gear:CreateTexture(nil, "ARTWORK")
-    f.gear.icon:SetAllPoints()
-    f.gear.icon:SetTexture("Interface\\Buttons\\UI-OptionsButton")
-    f.gear:SetScript("OnClick", function() ToggleSettings() end)
-    f.gear:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Windfall settings")
-        GameTooltip:Show()
-    end)
-    f.gear:SetScript("OnLeave", function() GameTooltip:Hide() end)
+local function Select(page)
+    panel = panel or BuildPanel()
+    switching = true
+    for other in pairs(pages) do
+        if other ~= page then rawHide(other) end
+    end
+    switching = false
+    current = page
+    rawShow(page)
+    page:ClearAllPoints()
+    page:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, -HEADER)
+    panel.title:SetText("|cff7fd36bWindfall|r")
+    for _, b in ipairs(panel.nav) do
+        b.text:SetTextColor(b.key == page.pageKey and 1 or 0.7, b.key == page.pageKey and 0.82 or 0.7,
+            b.key == page.pageKey and 0 or 0.7)
+    end
+    if not docked and not placed then
+        PlacePanel()
+        placed = true
+    end
+    Resize()
+    rawShow(panel)
+end
 
-    -- Professions.
-    f.prof = CreateFrame("Button", nil, f)
-    f.prof:SetSize(18, 18)
-    f.prof:SetPoint("RIGHT", f.gear, "LEFT", -4, 0)
-    f.prof.icon = f.prof:CreateTexture(nil, "ARTWORK")
-    f.prof.icon:SetAllPoints()
-    f.prof.icon:SetTexture("Interface\\Icons\\Trade_BlackSmithing")
-    f.prof.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
-    f.prof:SetScript("OnClick", function() ToggleProfessions() end)
-    f.prof:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Professions")
-        GameTooltip:AddLine("What your characters can craft, and what it earns or costs.", 1, 1, 1, true)
-        GameTooltip:Show()
-    end)
-    f.prof:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    f.fish:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Fishing key: " .. (db.fishKey or "not set")
-            .. (db.fishOn and "  |cff7fd36bON|r" or "  |cff999999off|r"))
-        GameTooltip:AddLine("While on, this key casts Fishing and then reels in the bobber. Off, the key is back to normal.", 1, 1, 1, true)
-        local getaway = GetawayText()
-        if getaway then GameTooltip:AddLine(getaway, 1, 1, 1) end
-        GameTooltip:AddLine("Click: switch on or off", 0.6, 0.6, 0.6)
-        GameTooltip:AddLine("Right-click: choose the key", 0.6, 0.6, 0.6)
-        GameTooltip:Show()
-    end)
-    f.fish:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    f.time:SetPoint("RIGHT", f.prof, "LEFT", -4, 0)
+-- A page: a plain frame inside the panel. Its Show, Hide, SetShown and
+-- IsShown work on the panel, so code written for separate windows still works.
+function NewPage(name, label, width, key)
+    panel = panel or BuildPanel()
+    local f = CreateFrame("Frame", name, panel)
+    f:SetSize(math.max(width, MIN_WIDTH), 200)
+    f.pageLabel, f.pageKey = label, key
+    -- Pages used to have a title of their own; some still set it.
+    f.title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    f.title:Hide()
+    rawHide(f)
+    pages[f] = true
+    byKey[key] = f
+    f.Show = function(self) Select(self) end
+    f.Hide = function(self)
+        rawHide(self)
+        if current == self and not switching then rawHide(panel) end
+    end
+    f.SetShown = function(self, show) if show then self:Show() else self:Hide() end end
+    f.IsShown = function(self) return current == self and rawIsShown(panel) and true or false end
+    f:HookScript("OnSizeChanged", function(self) if current == self then Resize() end end)
+    return f
+end
+
+-- Opens the panel on the page last shown (the farming page the first time),
+-- or closes it.
+function TogglePanel()
+    panel = panel or BuildPanel()
+    if rawIsShown(panel) then
+        rawHide(panel)
+        return
+    end
+    local key = current and current.pageKey or "farming"
+    local open = PageOpeners[key]
+    if open then open() elseif current then Select(current) end
+end
+
+-- Next to the auction house or a vendor while it is open; back to its own
+-- place afterwards, and closed again if it only opened for that.
+function DockPanel(target, openedForIt)
+    if not (panel and target) then return end
+    docked = true
+    openedForDock = openedForIt or openedForDock
+    panel:ClearAllPoints()
+    panel:SetPoint("TOPLEFT", target, "TOPRIGHT", 8, 0)
+end
+
+function UndockPanel()
+    if not (panel and docked) then return end
+    docked = false
+    PlacePanel()
+    if openedForDock then rawHide(panel) end
+    openedForDock = false
+end
+end
+
+-- ------------------------------------------------------------------- UI ----
+
+local function BuildFrame()
+    local f = NewPage("WindfallFrame", "Farming", WIDTH, "farming")
+
+    f.time = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    f.time:SetPoint("TOPLEFT", 10, -48)
+    f.time:SetWidth(WIDTH - 20)
     f.time:SetJustifyH("LEFT")
     f.time:SetWordWrap(false)
 
-    f.rate =f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    f.rate = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     f.rate:SetPoint("TOPLEFT", 10, -30)
 
     f.total = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -1353,7 +1443,7 @@ local function BuildFrame()
 
     f.rows = {}
     for i = 1, MAX_ROWS do
-        local y = -54 - (i - 1) * ROW_H
+        local y = -FARM_TOP - (i - 1) * ROW_H
         local row = {}
         row.name = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         row.name:SetPoint("TOPLEFT", 10, y)
@@ -1368,7 +1458,7 @@ local function BuildFrame()
     end
 
     f.hint = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    f.hint:SetPoint("TOPLEFT", 10, -54)
+    f.hint:SetPoint("TOPLEFT", 10, -FARM_TOP)
     f.hint:SetWidth(WIDTH - 20)
     f.hint:SetJustifyH("LEFT")
 
@@ -1425,8 +1515,7 @@ end
 
 function UpdateFishIcon()
     if not frame then return end
-    frame.fish.icon:SetDesaturated(not db.fishOn)
-    frame.fish:SetAlpha(db.fishOn and 1 or 0.45)
+    if UpdateBarIcons then UpdateBarIcons() end
     Refresh() -- the getaway line comes and goes with the fishing key
     RefreshSettings()
 end
@@ -1445,31 +1534,7 @@ local function ShortTime(seconds)
 end
 
 local function BuildHistoryFrame()
-    local f = CreateFrame("Frame", "WindfallHistoryFrame", UIParent, "BackdropTemplate")
-    f:SetSize(HISTORY_WIDTH, 120)
-    f:SetFrameStrata("MEDIUM")
-    f:SetClampedToScreen(true)
-    f:SetMovable(true)
-    f:EnableMouse(true)
-    f:RegisterForDrag("LeftButton")
-    f:SetScript("OnDragStart", f.StartMoving)
-    f:SetScript("OnDragStop", f.StopMovingOrSizing)
-    f:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        edgeSize = 12,
-        insets = { left = 3, right = 3, top = 3, bottom = 3 },
-    })
-    f:SetBackdropColor(0, 0, 0, 0.85)
-    f:SetBackdropBorderColor(0.4, 0.7, 0.3, 1)
-    f:SetPoint("CENTER", UIParent, "CENTER", 0, 80)
-
-    f.title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    f.title:SetPoint("TOPLEFT", 10, -9)
-
-    local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
-    close:SetPoint("TOPRIGHT", 1, 1)
-    close:SetScript("OnClick", function() f:Hide() end)
+    local f = NewPage("WindfallHistoryFrame", "Zones", HISTORY_WIDTH, "zones")
 
     local function Column(template, y)
         local row = {}
@@ -1599,6 +1664,12 @@ function ToggleHistory()
     RefreshHistory()
 end
 
+PageOpeners.zones = function()
+    historyFrame = historyFrame or BuildHistoryFrame()
+    historyFrame:Show()
+    RefreshHistory()
+end
+
 function Refresh()
     if not frame then return end
     local lootMode = db.mode == "loot"
@@ -1683,30 +1754,29 @@ function Refresh()
         hint = "No price: scan the auction house with Auctionator."
     end
     frame.hint:ClearAllPoints()
-    frame.hint:SetPoint("TOPLEFT", 10, -54 - shown * ROW_H)
+    frame.hint:SetPoint("TOPLEFT", 10, -FARM_TOP - shown * ROW_H)
     frame.hint:SetText(hint or "")
 
     local getaway = db.fishOn and GetawayText() or nil
     frame.getaway:ClearAllPoints()
-    frame.getaway:SetPoint("TOPLEFT", 10, -54 - shown * ROW_H - (hint and 26 or 0) - 2)
+    frame.getaway:SetPoint("TOPLEFT", 10, -FARM_TOP - shown * ROW_H - (hint and 26 or 0) - 2)
     frame.getaway:SetText(getaway or "")
 
     frame.toggle:SetText(running and "Pause" or "Start")
     frame.mode:SetText(MODE_LABEL[db.mode])
-    frame:SetHeight(54 + shown * ROW_H + (hint and 26 or 0) + (getaway and 18 or 0) + 36)
+    frame:SetHeight(FARM_TOP + shown * ROW_H + (hint and 26 or 0) + (getaway and 18 or 0) + 36)
     RefreshHistory()
+    if UpdateBar then UpdateBar() end
 end
 
 function Windfall_ToggleWindow()
     if not frame then return end
-    if frame:IsShown() then
-        frame:Hide()
-        db.hidden = true
-    else
-        frame:Show()
-        db.hidden = false
-        Refresh()
-    end
+    TogglePanel()
+end
+
+PageOpeners.farming = function()
+    frame:Show()
+    Refresh()
 end
 
 -- -------------------------------------------------------- minimap button ----
@@ -1779,38 +1849,144 @@ local function CreateMinimapButton()
     b:SetShown(not db.minimapHidden)
 end
 
+-- ------------------------------------------------------------------ bar ----
+
+-- A small bar that stays on screen: gold per hour and the session clock, and
+-- switches for the fishing key and node sparkles. The Windfall icon opens the
+-- panel; clicking the gold per hour opens the farming page.
+local function BarIcon(parent, texture, size)
+    local b = CreateFrame("Button", nil, parent)
+    b:SetSize(size, size)
+    b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    b.icon = b:CreateTexture(nil, "ARTWORK")
+    b.icon:SetAllPoints()
+    b.icon:SetTexture(texture)
+    b.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    return b
+end
+
+function BuildBar()
+    local b = CreateFrame("Frame", "WindfallBar", UIParent, "BackdropTemplate")
+    b:SetSize(250, 26)
+    b:SetFrameStrata("MEDIUM")
+    b:SetClampedToScreen(true)
+    b:SetMovable(true)
+    b:EnableMouse(true)
+    b:RegisterForDrag("LeftButton")
+    b:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        edgeSize = 10,
+        insets = { left = 2, right = 2, top = 2, bottom = 2 },
+    })
+    b:SetBackdropColor(0, 0, 0, 0.75)
+    b:SetBackdropBorderColor(0.4, 0.7, 0.3, 1)
+    local pos = db.barPos or db.pos
+    if pos then
+        b:SetPoint(pos[1], UIParent, pos[2], pos[3], pos[4])
+    else
+        b:SetPoint("RIGHT", UIParent, "RIGHT", -120, 0)
+    end
+    b:SetScript("OnDragStart", b.StartMoving)
+    b:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        local point, _, relPoint, x, y = self:GetPoint(1)
+        db.barPos = { point, relPoint, x, y }
+    end)
+
+    -- Windfall icon: the panel.
+    b.menu = BarIcon(b, "Interface\\AddOns\\Windfall\\Media\\icon", 18)
+    b.menu:SetPoint("RIGHT", -5, 0)
+    b.menu:SetScript("OnClick", function() TogglePanel() end)
+    b.menu:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Windfall")
+        GameTooltip:AddLine("Farming, zones, professions, route and settings.", 1, 1, 1, true)
+        GameTooltip:AddLine("Click: open or close", 0.6, 0.6, 0.6)
+        GameTooltip:AddLine("Drag the bar to move it", 0.6, 0.6, 0.6)
+        GameTooltip:Show()
+    end)
+
+    -- Node sparkles on or off.
+    b.sparkle = BarIcon(b, "Interface\\Icons\\INV_Misc_Flower_02", 16)
+    b.sparkle:SetPoint("RIGHT", b.menu, "LEFT", -6, 0)
+    b.sparkle:SetScript("OnClick", function() Windfall_ToggleSparkles() end)
+    b.sparkle:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Node sparkles" .. (db.sparkle and "  |cff7fd36bON|r" or "  |cff999999off|r"))
+        GameTooltip:AddLine("The nearest herb, ore or fishing pool you can gather gets a sparkle.", 1, 1, 1, true)
+        GameTooltip:AddLine("Click: switch on or off", 0.6, 0.6, 0.6)
+        GameTooltip:Show()
+    end)
+
+    -- Fishing key on or off; right-click picks the key.
+    b.fish = BarIcon(b, FISH_ICON, 16)
+    b.fish:SetPoint("RIGHT", b.sparkle, "LEFT", -6, 0)
+    b.fish:SetScript("OnClick", function(_, button)
+        if button == "RightButton" then StartKeyCapture() else Windfall_ToggleFishing() end
+    end)
+    b.fish:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Fishing key: " .. (db.fishKey or "not set")
+            .. (db.fishOn and "  |cff7fd36bON|r" or "  |cff999999off|r"))
+        GameTooltip:AddLine("While on, this key casts Fishing and then reels in the bobber. Off, the key is back to normal.", 1, 1, 1, true)
+        local getaway = GetawayText()
+        if getaway then GameTooltip:AddLine(getaway, 1, 1, 1) end
+        GameTooltip:AddLine("Click: switch on or off", 0.6, 0.6, 0.6)
+        GameTooltip:AddLine("Right-click: choose the key", 0.6, 0.6, 0.6)
+        GameTooltip:Show()
+    end)
+
+    -- Gold per hour and the clock: the farming page.
+    b.money = CreateFrame("Button", nil, b)
+    b.money:SetPoint("LEFT", 6, 0)
+    b.money:SetPoint("RIGHT", b.fish, "LEFT", -6, 0)
+    b.money:SetHeight(20)
+    b.money:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    b.rate = b.money:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    b.rate:SetPoint("LEFT")
+    b.time = b.money:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    b.time:SetPoint("LEFT", b.rate, "RIGHT", 6, 0)
+    b.money:SetScript("OnClick", function(_, button)
+        if button == "RightButton" then SetMode() else PageOpeners.farming() end
+    end)
+    b.money:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Windfall - " .. MODE_LABEL[db.mode])
+        GameTooltip:AddLine(frame.total:GetText() or "", 1, 1, 1)
+        GameTooltip:AddLine("Click: what you have gathered", 0.6, 0.6, 0.6)
+        GameTooltip:AddLine("Right-click: switch Gathering / All loot", 0.6, 0.6, 0.6)
+        GameTooltip:Show()
+    end)
+    b.money:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    b:SetShown(not db.barHidden)
+    return b
+end
+
+function UpdateBar()
+    if not (bar and frame) then return end
+    local minutes = math.floor((db.elapsed or 0) / 60)
+    local clock = minutes >= 60 and string.format("%dh %02dm", math.floor(minutes / 60), minutes % 60) or (minutes .. "m")
+    bar.rate:SetText((frame.rate:GetText() or ""):gsub(" |cffaaaaaa/ hour|r", "/h"))
+    bar.time:SetText(clock .. (running and "" or " |cffff8040paused|r"))
+end
+
+function UpdateBarIcons()
+    if not bar then return end
+    bar.fish.icon:SetDesaturated(not db.fishOn)
+    bar.fish:SetAlpha(db.fishOn and 1 or 0.45)
+    bar.sparkle.icon:SetDesaturated(not db.sparkle)
+    bar.sparkle:SetAlpha(db.sparkle and 1 or 0.45)
+end
+
 -- ---------------------------------------------------------------- slash ----
 
 -- ------------------------------------------------------------- settings ----
 
-local function MakeWindow(name, title, width)
-    local f = CreateFrame("Frame", name, UIParent, "BackdropTemplate")
-    f:SetSize(width, 200)
-    f:SetFrameStrata("HIGH")
-    f:SetClampedToScreen(true)
-    f:SetMovable(true)
-    f:EnableMouse(true)
-    f:RegisterForDrag("LeftButton")
-    f:SetScript("OnDragStart", f.StartMoving)
-    f:SetScript("OnDragStop", f.StopMovingOrSizing)
-    f:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        edgeSize = 12,
-        insets = { left = 3, right = 3, top = 3, bottom = 3 },
-    })
-    f:SetBackdropColor(0, 0, 0, 0.9)
-    f:SetBackdropBorderColor(0.4, 0.7, 0.3, 1)
-    f:SetPoint("CENTER", UIParent, "CENTER", 0, 60)
-    f.title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    f.title:SetPoint("TOPLEFT", 12, -10)
-    f.title:SetText("|cff7fd36bWindfall|r " .. title)
-    local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
-    close:SetPoint("TOPRIGHT", 1, 1)
-    close:SetScript("OnClick", function() f:Hide() end)
-    if UISpecialFrames then table.insert(UISpecialFrames, name) end -- Escape closes it
-    f:Hide()
-    return f
+local function MakeWindow(name, label, width, key)
+    return NewPage(name, label, width, key)
 end
 
 local settingsFrame
@@ -1840,16 +2016,20 @@ local SETTINGS = {
     { label = "Sparkle on the nearest gathering node",
         tip = "The nearest herb, ore or fishing pool close by gets a sparkle and the game's gather icon. Quest objects, chests and NPCs are left alone. The game only picks up nodes within about 15 yards.",
         get = function() return db.sparkle end,
-        set = function(value) db.sparkle = value ApplySparkles() end },
+        set = function(value) db.sparkle = value ApplySparkles() if UpdateBarIcons then UpdateBarIcons() end end },
     { key = "sparkleHerb", label = "    Herbs", after = function() SparkleRecheck() end },
     { key = "sparkleOre", label = "    Ore", after = function() SparkleRecheck() end },
     { key = "sparkleFish", label = "    Fishing pools", after = function() SparkleRecheck() end },
     { key = "interactDefault", label = "Interact back to game default when Windfall is done",
         tip = "When the line comes in or sparkles are switched off, the interact key goes to the game's defaults (10 yards, in front of you) instead of what was set before. Windfall leaves it alone the rest of the time." },
     { header = "Window" },
-    { label = "Show the Windfall window",
-        get = function() return frame:IsShown() end,
-        set = function(value) if value ~= frame:IsShown() then Windfall_ToggleWindow() end end },
+    { label = "Show the Windfall bar",
+        tip = "The small bar with your gold per hour and the fishing and sparkle switches.",
+        get = function() return not db.barHidden end,
+        set = function(value)
+            db.barHidden = not value
+            if bar then bar:SetShown(value) end
+        end },
     { label = "Show the minimap button",
         get = function() return not db.minimapHidden end,
         set = function(value)
@@ -1859,7 +2039,7 @@ local SETTINGS = {
 }
 
 local function BuildSettingsFrame()
-    local f = MakeWindow("WindfallSettingsFrame", "settings", 380)
+    local f = MakeWindow("WindfallSettingsFrame", "Settings", 380, "settings")
     f.checks = {}
     local y = -36
     for _, row in ipairs(SETTINGS) do
@@ -1932,6 +2112,12 @@ end
 function ToggleSettings()
     if not settingsFrame then settingsFrame = BuildSettingsFrame() end
     settingsFrame:SetShown(not settingsFrame:IsShown())
+    RefreshSettings()
+end
+
+PageOpeners.settings = function()
+    settingsFrame = settingsFrame or BuildSettingsFrame()
+    settingsFrame:Show()
     RefreshSettings()
 end
 
@@ -2399,7 +2585,7 @@ local function RecipeTooltip(row)
 end
 
 local function BuildProfessionsFrame()
-    local f = MakeWindow("WindfallProfessionsFrame", "professions", PROF_WIDTH)
+    local f = MakeWindow("WindfallProfessionsFrame", "Professions", PROF_WIDTH, "professions")
     f:SetHeight(84 + PROF_ROWS * ROW_H + 40)
 
     f.charButton = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
@@ -2682,6 +2868,10 @@ function ToggleProfessions()
     end
     RefreshProfessions()
 end
+
+PageOpeners.professions = function()
+    if not (profFrame and profFrame:IsShown()) then ToggleProfessions() end
+end
 end
 
 -- Route and shopping list, in a block of their own (the 200-locals limit).
@@ -2706,7 +2896,7 @@ local function BuildRoute(prof, target, charLevel)
     -- Level each rank needs, and where it comes from, from the trainer data.
     local rankNeeds = {}
     for _, entry in ipairs(trainer) do
-        if entry.rank then rankNeeds[entry.rank] = { level = entry[4] or 0, how = entry[5] } end
+        if entry.rank then rankNeeds[entry.rank] = { level = entry[4] or 0, how = entry[5], skill = entry[2] } end
     end
     -- Recipes with the game's own yellow and grey levels use those. For the
     -- rest, the colour the game shows now places them for the guess.
@@ -2739,15 +2929,17 @@ local function BuildRoute(prof, target, charLevel)
         -- trained (your cap is already that high) are skipped. A rank your
         -- character is too low for waits: level on up to the cap first.
         for _, r in ipairs(RANK_AT) do
-            if level >= r[1] and r[3] > cap and r[3] <= cap + 75 then
-                local needs = rankNeeds[r[2]] or { level = 0 }
+            -- Where the rank opens and how you get it come from the data (Cooking
+            -- and First Aid get Expert from a book and Artisan from a quest).
+            local needs = rankNeeds[r[2]] or { level = 0 }
+            if level >= (needs.skill or r[1]) and r[3] > cap and r[3] <= cap + 75 then
                 local tooLow = (charLevel or 0) < needs.level
                 if not tooLow then
-                    steps[#steps + 1] = { rank = r[2], at = level }
+                    steps[#steps + 1] = { rank = r[2], at = level, how = needs.how }
                     current = nil
                     cap = r[3]
                 elseif level >= cap then
-                    blocked = { rank = r[2], at = level, needLevel = needs.level }
+                    blocked = { rank = r[2], at = level, needLevel = needs.level, how = needs.how }
                 end
             end
         end
@@ -2818,7 +3010,7 @@ local SHOP_WIDTH = 520
 local ahOpen = false
 local merchantOpen, merchantItems = false, {} -- the vendor window, and what it sells
 local ScanMerchant, ToBuy
-local RefreshShoppingList, DockToAuctionHouse
+local RefreshShoppingList, DockToAuctionHouse, RankAction
 
 local function BagCountOf(itemID)
     local count = (C_Item and C_Item.GetItemCount) or GetItemCount
@@ -2948,13 +3140,15 @@ local function OnAuctionEvent(event, ...)
             if item.need * (shop.single and shop.crafts or 1) > BagCountOf(item.id) then anything = true end
         end
         if anything and shopFrame then
+            local already = shopFrame:IsShown()
             shopFrame:Show()
             -- The auction house frame is shown just after this event.
-            C_Timer.After(0, DockToAuctionHouse)
+            C_Timer.After(0, function() DockToAuctionHouse(not already) end)
         end
     elseif event == "AUCTION_HOUSE_CLOSED" then
         ahOpen = false
         StopBuying()
+        UndockPanel()
     elseif event == "MERCHANT_SHOW" or event == "MERCHANT_UPDATE" then
         merchantOpen = true
         ScanMerchant()
@@ -2964,11 +3158,9 @@ local function OnAuctionEvent(event, ...)
             if merchantItems[item.id] and ToBuy(item) > 0 then wanted = true end
         end
         if event == "MERCHANT_SHOW" and wanted and shopFrame then
+            local already = shopFrame:IsShown()
             shopFrame:Show()
-            if _G.MerchantFrame then
-                shopFrame:ClearAllPoints()
-                shopFrame:SetPoint("TOPLEFT", _G.MerchantFrame, "TOPRIGHT", 8, 0)
-            end
+            if _G.MerchantFrame then DockPanel(_G.MerchantFrame, not already) end
         end
     elseif event == "NEW_RECIPE_LEARNED" or event == "LEARNED_SPELL_IN_TAB" or event == "TRAINER_UPDATE"
         or event == "SKILL_LINES_CHANGED" then
@@ -2981,6 +3173,7 @@ local function OnAuctionEvent(event, ...)
     elseif event == "MERCHANT_CLOSED" then
         merchantOpen = false
         merchantItems = {}
+        UndockPanel()
     elseif event == "ITEM_KEY_ITEM_INFO_RECEIVED" then
         local itemID = ...
         if showing and itemID == showing.id and OpenBuyPage() then
@@ -3127,7 +3320,7 @@ function RefreshShoppingList()
         f.now:SetText(string.format("|cffff6060Capped at %d.|r %s needs level %d, so the route goes on from there.",
             now.at, now.rank, now.needLevel))
     elseif nowShown and now.rank then
-        f.now:SetText(string.format("|cffffd100Now:|r train %s at a trainer (skill %d).", now.rank, now.at))
+        f.now:SetText(string.format("|cffffd100Now:|r %s (skill %d).", RankAction(now.rank, now.how), now.at))
     elseif nowShown and now.p then
         local recipe = now.p.recipe
         local known = prof and prof.recipes[now.p.id]
@@ -3137,7 +3330,8 @@ function RefreshShoppingList()
                 name, Money(now.p.train or 0), now.crafts))
         else
             local can = math.min(now.crafts, CraftableCount(recipe))
-            f.now:SetText(string.format("|cffffd100Now:|r %s x%d  |cff888888(skill %d-%d)|r", name, now.crafts, now.from, now.to))
+            f.now:SetText(string.format("|cffffd100Now:|r %s x%d  |cff888888(skill %d-%d)|r%s", name, now.crafts, now.from, now.to,
+                recipe.item and "" or "\n|cff888888After Craft, click the item to enchant.|r"))
             f.craft:SetText(can > 0 and ("Craft " .. can) or "Need materials")
             f.craft:SetEnabled(can > 0)
             f.craft:Show()
@@ -3201,8 +3395,7 @@ function RefreshShoppingList()
 end
 
 local function BuildShoppingFrame()
-    local f = MakeWindow("WindfallShoppingFrame", "shopping list", SHOP_WIDTH)
-    f:SetPoint("CENTER", UIParent, "CENTER", 300, 60)
+    local f = MakeWindow("WindfallShoppingFrame", "Route", SHOP_WIDTH, "route")
     f.title2 = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     f.title2:SetPoint("TOPLEFT", 12, -34)
     f.title2:SetWidth(SHOP_WIDTH - 150)
@@ -3290,12 +3483,9 @@ local function BuildShoppingFrame()
 end
 
 -- Next to the auction house, when it is open.
-function DockToAuctionHouse()
+function DockToAuctionHouse(openedForIt)
     local ahFrame = _G.AuctionHouseFrame
-    if shopFrame and ahFrame and ahFrame:IsShown() then
-        shopFrame:ClearAllPoints()
-        shopFrame:SetPoint("TOPLEFT", ahFrame, "TOPRIGHT", 8, 0)
-    end
+    if shopFrame and ahFrame and ahFrame:IsShown() then DockPanel(ahFrame, openedForIt) end
 end
 
 local function OpenShopping()
@@ -3307,6 +3497,12 @@ local function OpenShopping()
     if ahOpen then DockToAuctionHouse() end
     merchantOpen = _G.MerchantFrame and _G.MerchantFrame:IsShown() and true or false
     ScanMerchant()
+    shopFrame:Show()
+    RefreshShoppingList()
+end
+
+PageOpeners.route = function()
+    shopFrame = shopFrame or BuildShoppingFrame()
     shopFrame:Show()
     RefreshShoppingList()
 end
@@ -3337,6 +3533,13 @@ function ShowShoppingList(recipe)
     OpenShopping()
 end
 
+-- What to do for a rank, by where it comes from.
+function RankAction(rank, how)
+    if how == "vendor" then return "buy the " .. rank .. " book from a vendor" end
+    if how == "quest" then return "do the " .. rank .. " quest" end
+    return "train " .. rank .. " at a trainer"
+end
+
 -- A whole route, up to target. Remembered, so it can move on as you level.
 local function FillRoute(keepStatus)
     local prof, r = RouteProfession()
@@ -3351,7 +3554,7 @@ local function FillRoute(keepStatus)
     for _, st in ipairs(steps) do
         if not shop.now then
             if st.rank then
-                shop.now = { rank = st.rank, at = st.at, needLevel = st.needLevel }
+                shop.now = { rank = st.rank, at = st.at, needLevel = st.needLevel, how = st.how }
             else
                 shop.now = { p = st.p, crafts = math.ceil(st.crafts - 0.001), from = st.from, to = st.to }
             end
@@ -3361,7 +3564,7 @@ local function FillRoute(keepStatus)
                 shop.lines[#shop.lines + 1] = string.format("|cffff6060%d: capped until level %d for %s|r",
                     st.at, st.needLevel, st.rank)
             elseif st.rank then
-                shop.lines[#shop.lines + 1] = string.format("|cffffd100%d: train %s|r", st.at, st.rank)
+                shop.lines[#shop.lines + 1] = string.format("|cffffd100%d: %s|r", st.at, RankAction(st.rank, st.how))
             else
                 shop.lines[#shop.lines + 1] = string.format("%d-%d: %s%s|r x%d%s", st.from, st.to,
                     DIFFICULTY_COLOR[select(2, SkillUpChance(st.p.id, st.p.unlock, st.from)) or ""] or "", st.p.recipe.name or "?",
@@ -3374,7 +3577,9 @@ local function FillRoute(keepStatus)
     shop.now = shop.now or { finished = true }
     if #steps > #shop.lines then shop.lines[#shop.lines + 1] = "|cff888888... and more steps|r" end
     if gaps[1] then
-        shop.lines[#shop.lines] = string.format("|cffff6060No priced recipe from %d. Scan the auction house.|r", gaps[1])
+        -- Added below the steps (or in place of the last one when the list is full).
+        local at = math.min(#shop.lines + 1, SHOP_STEP_ROWS)
+        shop.lines[at] = string.format("|cffff6060No priced recipe from %d. Scan the auction house.|r", gaps[1])
     end
     shop.items = items
     if not keepStatus and trainCost > 0 then
@@ -3495,7 +3700,7 @@ events:SetScript("OnEvent", function(_, event, arg1, _, arg3)
         end
     elseif event == "PLAYER_LOGIN" then
         frame = BuildFrame()
-        if db.hidden then frame:Hide() end
+        bar = BuildBar()
         Refresh()
         CreateMinimapButton()
         InitFishing()
@@ -3523,7 +3728,7 @@ events:SetScript("OnEvent", function(_, event, arg1, _, arg3)
     elseif event == "ZONE_CHANGED_NEW_AREA" or event == "SKILL_LINES_CHANGED" then
         if event == "SKILL_LINES_CHANGED" then SkillsChanged() end
         -- Zone, skill and lure all change the getaway line.
-        if db.fishOn and frame and frame:IsShown() then Refresh() end
+        if db.fishOn and frame then Refresh() end
     elseif event == "CHAT_MSG_LOOT" then
         OnLootMessage(arg1)
     elseif event == "CHAT_MSG_MONEY" then
