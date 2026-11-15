@@ -2249,6 +2249,8 @@ end
 -- with a guessed colour until the profession window says better.
 function SyncLearned(prof, charKey)
     if not (prof and prof.line) or charKey ~= CharacterKey() then return false end
+    local char = db.chars and db.chars[charKey]
+    if char and UnitLevel then char.level = UnitLevel("player") end
     -- Skill and cap as the game has them now: training a rank or a skill-up
     -- shows here without opening the profession window.
     if GetProfessions and GetProfessionInfo then
@@ -2698,9 +2700,14 @@ function RouteTarget(skill)
     return 300
 end
 
-local function BuildRoute(prof, target)
+local function BuildRoute(prof, target, charLevel)
     local skill = prof.skill or 1
     local trainer = prof.line and ns.TrainerRecipes[prof.line] or {}
+    -- Level each rank needs, and where it comes from, from the trainer data.
+    local rankNeeds = {}
+    for _, entry in ipairs(trainer) do
+        if entry.rank then rankNeeds[entry.rank] = { level = entry[4] or 0, how = entry[5] } end
+    end
     -- Recipes with the game's own yellow and grey levels use those. For the
     -- rest, the colour the game shows now places them for the guess.
     local guessBack = { optimal = 0, medium = 10, easy = 25, trivial = 40 }
@@ -2725,15 +2732,27 @@ local function BuildRoute(prof, target)
     local steps, crafts, trained, gaps = {}, {}, {}, {}
     local current
     local cap = prof.max or 0
+    local blocked
     for level = skill, target - 1 do
         -- The next rank, from the skill it can be trained at; ranks already
-        -- trained (your cap is already that high) are skipped.
+        -- trained (your cap is already that high) are skipped. A rank your
+        -- character is too low for waits: level on up to the cap first.
         for _, r in ipairs(RANK_AT) do
             if level >= r[1] and r[3] > cap and r[3] <= cap + 75 then
-                steps[#steps + 1] = { rank = r[2], at = level }
-                current = nil
-                cap = r[3]
+                local needs = rankNeeds[r[2]] or { level = 0 }
+                local tooLow = (charLevel or 0) < needs.level
+                if not tooLow then
+                    steps[#steps + 1] = { rank = r[2], at = level }
+                    current = nil
+                    cap = r[3]
+                elseif level >= cap then
+                    blocked = { rank = r[2], at = level, needLevel = needs.level }
+                end
             end
+        end
+        if blocked then
+            steps[#steps + 1] = blocked
+            break
         end
         -- The cheapest point among recipes with a good chance; a poor chance
         -- only when nothing better is left at this skill.
@@ -3099,7 +3118,10 @@ function RefreshShoppingList()
     local nowShown = not shop.single and now ~= nil
     f.now:SetShown(nowShown)
     f.craft:Hide()
-    if nowShown and now.rank then
+    if nowShown and now.rank and now.needLevel then
+        f.now:SetText(string.format("|cffff6060Capped at %d.|r %s needs level %d, so the route goes on from there.",
+            now.at, now.rank, now.needLevel))
+    elseif nowShown and now.rank then
         f.now:SetText(string.format("|cffffd100Now:|r train %s at a trainer (skill %d).", now.rank, now.at))
     elseif nowShown and now.p then
         local recipe = now.p.recipe
@@ -3315,7 +3337,8 @@ local function FillRoute(keepStatus)
     local prof, r = RouteProfession()
     if not prof then return end
     SyncLearned(prof, r.char)
-    local steps, items, trainCost, gaps = BuildRoute(prof, r.target)
+    local char = db.chars and db.chars[r.char]
+    local steps, items, trainCost, gaps = BuildRoute(prof, r.target, char and char.level)
     shop.single = false
     shop.title = string.format("%s %d to %d", r.name, prof.skill or 1, r.target)
     shop.lines = {}
@@ -3323,13 +3346,16 @@ local function FillRoute(keepStatus)
     for _, st in ipairs(steps) do
         if not shop.now then
             if st.rank then
-                shop.now = { rank = st.rank, at = st.at }
+                shop.now = { rank = st.rank, at = st.at, needLevel = st.needLevel }
             else
                 shop.now = { p = st.p, crafts = math.ceil(st.crafts - 0.001), from = st.from, to = st.to }
             end
         end
         if #shop.lines < SHOP_STEP_ROWS - 1 then
-            if st.rank then
+            if st.rank and st.needLevel then
+                shop.lines[#shop.lines + 1] = string.format("|cffff6060%d: capped until level %d for %s|r",
+                    st.at, st.needLevel, st.rank)
+            elseif st.rank then
                 shop.lines[#shop.lines + 1] = string.format("|cffffd100%d: train %s|r", st.at, st.rank)
             else
                 shop.lines[#shop.lines + 1] = string.format("%d-%d: %s%s|r x%d%s", st.from, st.to,

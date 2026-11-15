@@ -2,6 +2,10 @@
 
 All changes to Windfall, newest first. After an update, type `/reload` in game (or restart the game when the notes say so).
 
+## [0.2.32] - 2026-11-15
+
+- **Ranks you are too low for no longer stop the route.** When a rank needs a higher character level (Expert needs level 20), the route keeps you crafting up to your current skill cap and then says how far you are capped and why. Once you reach the level, the "train" step appears where it should.
+
 ## [0.2.31] - 2026-11-15
 
 - **Show no longer leaves the auction house stuck searching.** When you Show the next material while the auction house is still on the last one's page, Windfall first goes back to the Buy tab, as changing tab by hand did. If the auction house is busy it waits until it is ready, and if the listings still do not come it starts over once by itself.

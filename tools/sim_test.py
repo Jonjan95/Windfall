@@ -525,6 +525,20 @@ print(rt.eval(r'''(function()
   GetProfessionInfo = function(i) if i == 101 then return "Leatherworking", 1, lwRank, lwMax, 0, 0, 165, 0 end return oldGPI(i) end
   ev2(S, "SKILL_LINES_CHANGED"); runTimers(); g("skill 50, cap 75")
   lwMax = 150; ev2(S, "SKILL_LINES_CHANGED"); runTimers(); g("journeyman trained, cap 150")
+  -- level 10 at skill 120, cap 150, route to 225: too low for Expert
+  lwRank, lwMax = 120, 150; playerLevel = 10
+  trade.skill, trade.max = 120, 150
+  trade.recipes[3768] = { name = "Hillman's Shoulders", item = 4251, rd = 0, reagents = { {2318, 4}, {2320, 1} } }
+  trade.recipes[3779] = { name = "Barbaric Belt", item = 4264, rd = 0, reagents = { {2318, 6}, {2320, 2} } }
+  ev(nil, "TRADE_SKILL_LIST_UPDATE"); runTimers()
+  local PF = WindfallProfessionsFrame
+  if not PF:IsShown() then SlashCmdList.WINDFALL("prof") end
+  if PF.modeButton.text ~= "Levelling plan" then PF.modeButton.onOnClick(PF.modeButton) end
+  ev2(S, "SKILL_LINES_CHANGED"); runTimers()
+  PF.route.onOnClick(PF.route, "RightButton"); PF.route.onOnClick(PF.route, "LeftButton")
+  local function steps(label) out[#out+1] = "rank: "..label.." -> "..tostring(S.title2.text).." | now: "..tostring(S.now.text); for i = 1, 8 do local t = S.lines[i].text; if t and t ~= "" then out[#out+1] = "      step "..t end end end
+  steps("level 10, too low for Expert")
+  playerLevel = 20; ev2(S, "SKILL_LINES_CHANGED"); runTimers(); steps("level 20")
   GetProfessionInfo = oldGPI; gatherProfs = { 182, 186 }
   -- forget needs shift, load brings it back
   local P = WindfallProfessionsFrame
