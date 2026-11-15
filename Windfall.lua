@@ -20,6 +20,7 @@ local frame         -- main window, built on login
 local historyFrame  -- zone history window, built on first use
 local Refresh, RefreshHistory, ToggleHistory
 local ToggleSettings, RefreshSettings
+local ResetInteract
 
 -- ---------------------------------------------------------- item helpers ----
 
@@ -416,12 +417,14 @@ end
 
 -- Each setting goes back only if nothing else changed it in the meantime.
 local function ReleaseCVars()
+    local used = next(cvarLease) ~= nil
     for name, lease in pairs(cvarLease) do
         if C_CVar.GetCVar(name) == lease.ours then
             pcall(C_CVar.SetCVar, name, lease.original)
         end
         cvarLease[name] = nil
     end
+    if used and ResetInteract then ResetInteract() end
 end
 
 local fishButton = CreateFrame("Button", "WindfallFishButton", UIParent, "SecureActionButtonTemplate")
@@ -932,6 +935,215 @@ end
 BINDING_HEADER_WINDFALL = "Windfall"
 BINDING_NAME_WINDFALL_FISHTOGGLE = "Fishing key on / off"
 BINDING_NAME_WINDFALL_WINDOW = "Show or hide the window"
+BINDING_NAME_WINDFALL_SPARKLE = "Node sparkles on / off"
+
+-- ------------------------------------------------------------- sparkles ----
+
+-- Makes the nearest herb, ore or fishing pool stand out, and nothing else.
+-- The game's soft target picks the nearest thing you can interact with; while
+-- that is a gathering node, its icon is switched on and a sparkle is drawn on
+-- it. Quest objects, chests and NPCs get nothing.
+
+local SPARKLE_COLORS = {
+    herb = { 0.35, 1, 0.35 },
+    ore = { 1, 0.6, 0.2 },
+    fish = { 0.35, 0.75, 1 },
+}
+local SPARKLE_TYPES = { herb = "sparkleHerb", ore = "sparkleOre", fish = "sparkleFish" }
+local GATHERMATE_TYPES = { ["Herb Gathering"] = "herb", ["Mining"] = "ore", ["Fishing"] = "fish" }
+
+-- English names, used when GatherMate2 is not loaded to give the client's own.
+local HERB_NODES = {}
+for _, name in ipairs({
+    "Peacebloom", "Silverleaf", "Earthroot", "Mageroyal", "Briarthorn", "Stranglekelp", "Bruiseweed",
+    "Wild Steelbloom", "Grave Moss", "Kingsblood", "Liferoot", "Fadeleaf", "Goldthorn", "Khadgar's Whisker",
+    "Wintersbite", "Firebloom", "Purple Lotus", "Arthas' Tears", "Sungrass", "Blindweed", "Ghost Mushroom",
+    "Gromsblood", "Golden Sansam", "Dreamfoil", "Mountain Silversage", "Plaguebloom", "Icecap", "Black Lotus",
+    "Wilted Peacebloom",
+}) do HERB_NODES[name] = true end
+
+local function NodeType(name)
+    local GM = LibStub and LibStub("AceAddon-3.0", true)
+    GM = GM and GM:GetAddon("GatherMate2", true)
+    if GM and GM.nodeIDs then
+        for gmType, ours in pairs(GATHERMATE_TYPES) do
+            if GM.nodeIDs[gmType] and GM.nodeIDs[gmType][name] then return ours end
+        end
+    end
+    if HERB_NODES[name] then return "herb" end
+    if name:find(" Vein$") or name:find(" Deposit$") then return "ore" end
+    if name:find(" School$") or name:find(" Swarm$") or name == "Floating Wreckage" or name == "Floating Debris"
+        or name == "Oil Spill" or name == "Patch of Elemental Water" then
+        return "fish"
+    end
+    return nil
+end
+
+-- Soft targeting reaches all round you and a bit further while sparkles are
+-- on, so the nearest node is picked up without facing it.
+local SPARKLE_CVARS = {
+    SoftTargetInteract = "3",
+    SoftTargetInteractArc = "2",
+    SoftTargetInteractRange = "30",
+    SoftTargetNameplateInteract = "1",
+}
+local sparkleLease = {}
+local sparkleTicker, sparkleGUID, sparkleFrame, iconOn
+
+local function SetCVarSafe(name, value)
+    if C_CVar and C_CVar.SetCVar then pcall(C_CVar.SetCVar, name, value) end
+end
+
+local function GetCVarSafe(name)
+    return C_CVar and C_CVar.GetCVar and C_CVar.GetCVar(name)
+end
+
+-- The game's icon over the soft target, on only while it is a node.
+local function SetNodeIcon(on)
+    if iconOn == on then return end
+    if not sparkleLease.SoftTargetIconGameObject then
+        local current = GetCVarSafe("SoftTargetIconGameObject")
+        if current == nil then return end
+        sparkleLease.SoftTargetIconGameObject = { original = current }
+    end
+    iconOn = on
+    SetCVarSafe("SoftTargetIconGameObject", on and "1" or "0")
+    sparkleLease.SoftTargetIconGameObject.ours = GetCVarSafe("SoftTargetIconGameObject")
+end
+
+local function BuildSparkle()
+    local f = CreateFrame("Frame", nil, UIParent)
+    f:SetSize(64, 64)
+    f:SetFrameStrata("LOW")
+    f.glow = f:CreateTexture(nil, "ARTWORK")
+    f.glow:SetAllPoints()
+    f.glow:SetTexture("Interface\\Cooldown\\star4")
+    f.glow:SetBlendMode("ADD")
+    f.ring = f:CreateTexture(nil, "ARTWORK")
+    f.ring:SetPoint("CENTER")
+    f.ring:SetSize(40, 40)
+    f.ring:SetTexture("Interface\\Cooldown\\starburst")
+    f.ring:SetBlendMode("ADD")
+    -- Turning and pulsing, done by hand so it works on any client.
+    f:SetScript("OnUpdate", function(self, elapsed)
+        self.t = (self.t or 0) + elapsed
+        local pulse = 0.65 + 0.35 * math.sin(self.t * 4)
+        self.glow:SetAlpha(pulse)
+        self.ring:SetAlpha(1.2 - pulse)
+        if self.glow.SetRotation then self.glow:SetRotation(self.t * 1.5) end
+        if self.ring.SetRotation then self.ring:SetRotation(-self.t) end
+    end)
+    f:Hide()
+    return f
+end
+
+local function HideSparkle()
+    if sparkleFrame then sparkleFrame:Hide() end
+end
+
+local function ShowSparkle(kind)
+    local plate
+    if C_NamePlate and C_NamePlate.GetNamePlateForUnit then
+        local ok, p = pcall(C_NamePlate.GetNamePlateForUnit, "softinteract")
+        plate = ok and p or nil
+    end
+    if not plate then
+        HideSparkle()
+        return
+    end
+    sparkleFrame = sparkleFrame or BuildSparkle()
+    local c = SPARKLE_COLORS[kind]
+    sparkleFrame.glow:SetVertexColor(c[1], c[2], c[3])
+    sparkleFrame.ring:SetVertexColor(c[1], c[2], c[3])
+    sparkleFrame:ClearAllPoints()
+    sparkleFrame:SetPoint("CENTER", plate, "CENTER", 0, 0)
+    sparkleFrame:Show()
+end
+
+local sparkleKind
+
+local function SparkleCheck()
+    local guid = UnitGUID and UnitGUID("softinteract")
+    if guid and issecretvalue and issecretvalue(guid) then guid = nil end
+    if guid ~= sparkleGUID then
+        sparkleGUID = guid
+        sparkleKind = nil
+        if guid then
+            local name = UnitName("softinteract")
+            if type(name) == "string" and not (issecretvalue and issecretvalue(name)) then
+                local kind = NodeType(name)
+                if kind and db[SPARKLE_TYPES[kind]] ~= false then sparkleKind = kind end
+            end
+        end
+        SetNodeIcon(sparkleKind ~= nil)
+    end
+    -- Re-placed every check: the nameplate can show up a moment late, and
+    -- the game reuses nameplates.
+    if sparkleKind then ShowSparkle(sparkleKind) else HideSparkle() end
+end
+
+local function StopSparkles()
+    if not sparkleTicker then return end
+    sparkleTicker:Cancel()
+    sparkleTicker = nil
+    HideSparkle()
+    sparkleGUID, sparkleKind, iconOn = nil, nil, nil
+    -- Each setting goes back only if nothing else changed it in the meantime.
+    for name, lease in pairs(sparkleLease) do
+        if lease.ours == nil or GetCVarSafe(name) == lease.ours then SetCVarSafe(name, lease.original) end
+        sparkleLease[name] = nil
+    end
+    ResetInteract()
+end
+
+-- When Windfall is done with the interact settings (the line comes in, or
+-- sparkles are switched off), they go to the game's own defaults rather than
+-- back to what was there before, which may be a wide setting left behind by
+-- another addon. Windfall never touches them otherwise, so what other addons
+-- such as EllesmereUI do is left alone.
+local INTERACT_DEFAULTS = {
+    SoftTargetInteractRange = "10",
+    SoftTargetInteractArc = "0",
+    SoftTargetIconGameObject = "0",
+    SoftTargetNameplateInteract = "0",
+}
+
+function ResetInteract()
+    if not db or db.interactDefault == false then return end
+    if fishingNow or sparkleTicker then return end
+    for name, fallback in pairs(INTERACT_DEFAULTS) do
+        local current = GetCVarSafe(name)
+        if current ~= nil then
+            local default = C_CVar.GetCVarDefault and C_CVar.GetCVarDefault(name) or fallback
+            if tonumber(current) ~= tonumber(default) then SetCVarSafe(name, default) end
+        end
+    end
+end
+
+local function StartSparkles()
+    if sparkleTicker then return end
+    for name, value in pairs(SPARKLE_CVARS) do
+        local current = GetCVarSafe(name)
+        if current ~= nil and not sparkleLease[name] then
+            SetCVarSafe(name, value)
+            sparkleLease[name] = { original = current, ours = GetCVarSafe(name) }
+        end
+    end
+    SetNodeIcon(false)
+    sparkleTicker = C_Timer.NewTicker(0.2, SparkleCheck)
+end
+
+local function ApplySparkles()
+    if db.sparkle then StartSparkles() else StopSparkles() end
+end
+
+function Windfall_ToggleSparkles()
+    if not db then return end
+    db.sparkle = not db.sparkle
+    ApplySparkles()
+    print("|cff7fd36bWindfall|r: node sparkles " .. (db.sparkle and "on" or "off") .. ".")
+    if RefreshSettings then RefreshSettings() end
+end
 
 -- Skill at which no fish get away, by zone. Below that some get away, and
 -- 95 points under it you cannot fish there at all. Lure and pole bonuses
@@ -1555,6 +1767,16 @@ local SETTINGS = {
         tip = "Sound effects go to full and music and ambience to a quarter, until the line comes in." },
     { key = "fishSleep", label = "Switch off after 10 idle minutes, and follow the pole",
         tip = "The fishing key switches itself off after 10 minutes without fishing. Equipping a pole by hand switches it on; taking it off switches it off." },
+    { header = "Gathering" },
+    { label = "Sparkle on the nearest gathering node",
+        tip = "The nearest herb, ore or fishing pool close by gets a sparkle and the game's gather icon. Quest objects, chests and NPCs are left alone. The game only picks up nodes within about 15 yards.",
+        get = function() return db.sparkle end,
+        set = function(value) db.sparkle = value ApplySparkles() end },
+    { key = "sparkleHerb", label = "    Herbs", after = function() sparkleGUID = false end },
+    { key = "sparkleOre", label = "    Ore", after = function() sparkleGUID = false end },
+    { key = "sparkleFish", label = "    Fishing pools", after = function() sparkleGUID = false end },
+    { key = "interactDefault", label = "Interact back to game default when Windfall is done",
+        tip = "When the line comes in or sparkles are switched off, the interact key goes to the game's defaults (10 yards, in front of you) instead of what was set before. Windfall leaves it alone the rest of the time." },
     { header = "Window" },
     { label = "Show the Windfall window",
         get = function() return frame:IsShown() end,
@@ -1681,6 +1903,8 @@ SlashCmdList["WINDFALL"] = function(msg)
         ToggleHistory()
     elseif msg == "discard" then
         Reset(true)
+    elseif msg == "sparkle" or msg == "sparkles" then
+        Windfall_ToggleSparkles()
     elseif msg == "minimap" then
         db.minimapHidden = not db.minimapHidden
         if minimapButton then minimapButton:SetShown(not db.minimapHidden) end
@@ -1688,7 +1912,7 @@ SlashCmdList["WINDFALL"] = function(msg)
     elseif msg == "" or msg == "show" or msg == "hide" or msg == "toggle" then
         Windfall_ToggleWindow()
     else
-        print("|cff7fd36bWindfall|r: /wf (show or hide), /wf settings, /wf zones (zone history), /wf gather, /wf loot, /wf start, /wf pause, /wf reset (save and start over), /wf discard, /wf fish (fishing key on or off), /wf fishkey (choose the key)")
+        print("|cff7fd36bWindfall|r: /wf (show or hide), /wf settings, /wf zones (zone history), /wf gather, /wf loot, /wf start, /wf pause, /wf reset (save and start over), /wf discard, /wf fish (fishing key on or off), /wf fishkey (choose the key), /wf sparkle (node sparkles on or off)")
     end
 end
 
@@ -1723,6 +1947,7 @@ events:SetScript("OnEvent", function(_, event, arg1, _, arg3)
         db.money = db.money or 0
         db.zones = db.zones or {}
         db.history = db.history or {}
+        db.sparkleRange = nil -- the range button of 0.2.14 is gone
         if db.mode ~= "loot" then db.mode = "gather" end
         -- Sessions saved by 0.1.0 only ever held gathered herbs.
         for _, item in pairs(db.items) do
@@ -1734,12 +1959,14 @@ events:SetScript("OnEvent", function(_, event, arg1, _, arg3)
         Refresh()
         CreateMinimapButton()
         InitFishing()
+        if db.sparkle then StartSparkles() end
         UpdateFishIcon()
         C_Timer.NewTicker(1, Tick)
     elseif event == "PLAYER_LOGOUT" then
         Pause()
         ReleaseCVars()
         UpdateAutoLoot(true)
+        StopSparkles()
     elseif not db then
         return
     elseif event == "UNIT_SPELLCAST_CHANNEL_START" then

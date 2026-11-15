@@ -11,6 +11,12 @@ A World of Warcraft Forever addon that shows what your farming is worth: the val
 - **Calm numbers:** the window redraws when you loot something or once a minute.
 - **Zone history:** Reset saves the session per zone. The Zones window ranks zones by gold per hour, so you can tell which spot is worth farming.
 
+## Node sparkles
+
+Switched on in the settings, the nearest herb, ore vein or fishing pool close by gets a sparkle and the game's gather icon. Quest objects, chests and NPCs get nothing. Each kind can be switched off on its own.
+
+When Windfall is done with the interact key (the line comes in, or sparkles are switched off), it puts it back to the game's defaults: 10 yards, in front of you. The rest of the time it leaves the interact settings alone, so other addons can set them as they like. This is a setting too.
+
 ## Fishing key
 
 - **One key:** while on, a press casts Fishing and the next press reels in the bobber. Off, the key does whatever it normally does. Keyboard keys, mouse buttons and the wheel all work.
@@ -33,8 +39,9 @@ Every option is a checkbox in the settings window (the gear icon in the title ba
 | `/wf reset` | Save the session to the zone history and start over (`/wf discard` throws it away) |
 | `/wf fish` | Fishing key on or off |
 | `/wf fishkey` | Choose the fishing key |
+| `/wf sparkle` | Node sparkles on or off |
 
-Key bindings for the fishing switch and the window are under Options > Keybindings > AddOns > Windfall.
+Key bindings for the fishing switch, node sparkles and the window are under Options > Keybindings > AddOns > Windfall.
 
 ## Development
 

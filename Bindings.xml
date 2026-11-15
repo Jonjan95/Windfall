@@ -5,4 +5,7 @@
 	<Binding name="WINDFALL_WINDOW" category="ADDONS">
 		Windfall_ToggleWindow()
 	</Binding>
+	<Binding name="WINDFALL_SPARKLE" category="ADDONS">
+		Windfall_ToggleSparkles()
+	</Binding>
 </Bindings>

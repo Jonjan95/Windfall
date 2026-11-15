@@ -29,9 +29,10 @@ local function widget()
   local w = {shown=true}
   return setmetatable(w, {__index=function(t,k)
     if k=="IsShown" then return function(s) return s.shown end end
-    if k=="Hide" then return function(s) s.shown=false end end
+    if k=="Hide" then return function(s) s.shown=false; if rawget(s,"isSparkle") then sparkleShown=false end end end
+    if k=="SetFrameStrata" then return function(s,v) if v=="LOW" then rawset(s,"isSparkle",true) end end end
     if k=="SetShown" then return function(s,v) s.shown=v and true or false end end
-    if k=="Show" then return function(s) s.shown=true end end
+    if k=="Show" then return function(s) s.shown=true; if rawget(s,"isSparkle") then sparkleShown=true end end end
     if k=="CreateFontString" or k=="CreateTexture" then return function() return widget() end end
     if k=="GetText" then return function(s) return s.text end end
     if k=="GetWidth" then return function() return 140 end end
@@ -90,6 +91,13 @@ skill = nil faction = "Alliance" UISpecialFrames = {}
 function GetProfessions() return nil, nil, nil, skill and 1 or nil end
 function GetProfessionInfo() return "Fishing", 1, skill[1], skill[2], 0, 0, 356, skill[3] end
 function UnitFactionGroup() return faction end
+soft = nil plateMissing = false sparkleShown = false
+function UnitGUID(u) if u == "softinteract" and soft then return soft.guid end end
+do local oldUnitName = UnitName
+  function UnitName(u) if u == "softinteract" then return soft and soft.name end if oldUnitName then return oldUnitName(u) end end end
+C_NamePlate = { GetNamePlateForUnit=function(u) if u == "softinteract" and soft and not plateMissing then return UIParent end end }
+do local oldNT = C_Timer.NewTicker
+  C_Timer.NewTicker = function(d, fn) if d == 0.2 then sparkleTick = fn; return { Cancel=function() sparkleTick = function() end end } end return oldNT(d, fn) end end
 Auctionator = { API = { v1 = { GetAuctionPriceByItemID=function(caller,id)
   local p={[13466]=2840,[10620]=4000,[8170]=900,[7909]=30000,[4306]=100} return p[id] end } } }
 ''')
@@ -272,5 +280,46 @@ print(rt.eval(r'''(function()
   zone = "Gilneas"; ev(nil, "ZONE_CHANGED_NEW_AREA"); ga("zone without data")
   skill = nil; ev(nil, "SKILL_LINES_CHANGED"); ga("no Fishing skill")
   SlashCmdList.WINDFALL("fish"); ga("key off again")
+  -- node sparkles
+  local function sp(label)
+    local fr = sparkleShown and "sparkle shown" or "no sparkle"
+    out[#out+1] = "sparkle: "..label.." -> "..fr.." icon="..tostring(cvars.SoftTargetIconGameObject).." interact="..tostring(cvars.SoftTargetInteract).." range="..tostring(cvars.SoftTargetInteractRange).." plates="..tostring(cvars.SoftTargetNameplateInteract)
+  end
+  cvars.SoftTargetInteract = "0"; cvars.SoftTargetInteractRange = "10"; cvars.SoftTargetIconGameObject = "0"; cvars.SoftTargetNameplateInteract = "0"; cvars.SoftTargetInteractArc = "0"
+  sp("sparkles off by default")
+  SlashCmdList.WINDFALL("sparkle"); sparkleTick(); sp("switched on, nothing near")
+  soft = { guid = "GameObject-1", name = "Plaguebloom" }; sparkleTick(); sp("Plaguebloom nearby")
+  soft = { guid = "GameObject-2", name = "Rich Thorium Vein" }; sparkleTick(); sp("Rich Thorium Vein (by name rule)")
+  soft = { guid = "Creature-3", name = "Scourge Champion" }; sparkleTick(); sp("quest mob")
+  soft = { guid = "GameObject-4", name = "Sturdy Locked Chest" }; sparkleTick(); sp("chest")
+  soft = { guid = "GameObject-5", name = "Stonescale Eel Swarm" }; sparkleTick(); sp("fishing pool")
+  SlashCmdList.WINDFALL("settings"); local sf2 = WindfallSettingsFrame
+  for _, c in ipairs(sf2.checks) do if c.label.text == "    Fishing pools" then c.checked = false; c.onOnClick(c) end end
+  sparkleTick(); sp("fishing pools unticked")
+  soft = { guid = "GameObject-6", name = "Peacebloom" }; plateMissing = true; sparkleTick(); sp("herb, nameplate not there yet")
+  plateMissing = false; sparkleTick(); sp("nameplate appears")
+  soft = nil; sparkleTick(); sp("walked away")
+  SlashCmdList.WINDFALL("sparkle"); sp("switched off: settings restored")
+  -- interact defaults
+  local function it(label)
+    out[#out+1] = "interact: "..label.." -> range="..tostring(cvars.SoftTargetInteractRange).." arc="..tostring(cvars.SoftTargetInteractArc).." icon="..tostring(cvars.SoftTargetIconGameObject)
+  end
+  cvars.SoftTargetInteractRange = "60"; cvars.SoftTargetInteractArc = "2"; cvars.SoftTargetIconGameObject = "1"
+  it("set by another addon")
+  ev(nil, "PLAYER_LOGOUT"); it("logout without using Windfall: untouched")
+  if WindfallDB.fishOn then SlashCmdList.WINDFALL("fish") end
+  SlashCmdList.WINDFALL("fish"); it("fishing key on, line not out yet: untouched")
+  ev(nil,"UNIT_SPELLCAST_CHANNEL_START","player","x",7620); it("line out")
+  ev(nil,"UNIT_SPELLCAST_CHANNEL_STOP","player","x",7620); it("line in: game default")
+  cvars.SoftTargetInteractRange = "60"; cvars.SoftTargetInteractArc = "2"
+  it("another addon sets it again")
+  SlashCmdList.WINDFALL("fish"); it("fishing key off: untouched")
+  SlashCmdList.WINDFALL("sparkle"); it("sparkles on")
+  SlashCmdList.WINDFALL("sparkle"); it("sparkles off: game default")
+  local sf3 = WindfallSettingsFrame
+  for _, c in ipairs(sf3.checks) do if c.label.text:find("^Interact back") then c.checked = false; c.onOnClick(c) end end
+  cvars.SoftTargetInteractRange = "60"
+  SlashCmdList.WINDFALL("sparkle"); SlashCmdList.WINDFALL("sparkle")
+  it("option off: back to what was there (60)")
   return table.concat(out, "\n")
 end)()''').replace("|cffffd700g|r","g").replace("|cffc7c7cfs|r","s").replace("|cffeda55fc|r","c"))
