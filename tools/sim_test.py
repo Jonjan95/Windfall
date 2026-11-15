@@ -450,14 +450,22 @@ print(rt.eval(r'''(function()
   S:Hide(); P.route.onOnClick(P.route, "LeftButton")
   local row; for i = 1, 6 do if S.rows[i]:IsShown() and S.rows[i].buy:IsShown() then row = S.rows[i] break end end
   sh("AH open")
-  row.buy.onOnClick(row.buy); out[#out+1] = "ah: searched itemKey="..tostring(lastSearch).." button="..row.buy.text
-  ahResults[row.item] = { { unitPrice = 25, quantity = 10 }, { unitPrice = 40, quantity = 100 } }
-  ev2(S, "COMMODITY_SEARCH_RESULTS_UPDATED", row.item); sh("results arrived")
-  row.buy.onOnClick(row.buy); out[#out+1] = "ah: started purchase "..tostring(startedQty).." button="..row.buy.text
-  ev2(S, "COMMODITY_PRICE_UPDATED", 39, 39 * startedQty); sh("price came back")
-  row.buy.onOnClick(row.buy); out[#out+1] = "ah: confirmed "..tostring(confirmedQty)
-  bags[row.item] = (bags[row.item] or 0) + confirmedQty
-  ev2(S, "COMMODITY_PURCHASE_SUCCEEDED"); ev2(S, "BAG_UPDATE_DELAYED"); sh("bought")
+  -- Show opens the item's buy page in the game's auction house window
+  local display = CreateFrame("Frame"); display.shown = true
+  display.SetQuantitySelected = false -- not every client has it
+  display.QuantityInput = { SetQuantity = function(_, n) shownQty = n end }
+  AuctionHouseFrame.CommoditiesBuyFrame = { BuyDisplay = display }
+  AuctionHouseFrame.SelectBrowseResult = function(_, r) selected = r.itemKey.itemID end
+  knownKeys = {}
+  C_AuctionHouse.GetItemKeyInfo = function(key) return knownKeys[key.itemID] end
+  row.buy.onOnClick(row.buy); runTimers()
+  out[#out+1] = "ah: item not known yet -> selected="..tostring(selected).." status: "..tostring(S.status.text)
+  knownKeys[row.item] = { isCommodity = true }
+  ev2(S, "ITEM_KEY_ITEM_INFO_RECEIVED", row.item); runTimers()
+  out[#out+1] = "ah: item info arrived -> selected="..tostring(selected).." quantity filled="..tostring(shownQty).." button="..row.buy.text.." status: "..tostring(S.status.text)
+  shownQty = nil; ev2(S, "COMMODITY_SEARCH_RESULTS_UPDATED", row.item); runTimers()
+  out[#out+1] = "ah: listings arrived, amount filled again="..tostring(shownQty)
+  out[#out+1] = "ah: anything bought by Windfall? started="..tostring(startedQty).." confirmed="..tostring(confirmedQty)
   ev2(S, "AUCTION_HOUSE_CLOSED"); sh("AH closed")
   -- forget needs shift, load brings it back
   local P = WindfallProfessionsFrame

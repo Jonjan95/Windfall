@@ -2692,7 +2692,6 @@ local SHOP_STEP_ROWS = 8
 local SHOP_ROWS = 10
 local SHOP_WIDTH = 520
 local ahOpen = false
-local buying                    -- the item being bought: { id, qty, step, ... }
 local RefreshShoppingList, DockToAuctionHouse
 
 local function BagCountOf(itemID)
@@ -2704,123 +2703,61 @@ local function ItemName(itemID)
     return (C_Item and C_Item.GetItemNameByID and C_Item.GetItemNameByID(itemID)) or ("item " .. itemID)
 end
 
--- ------------------------------------------------------------ buying ------
+-- ------------------------------------------------------- auction house ------
 
+-- The Show button opens an item's buy page in the game's own auction house
+-- window, with the amount you still need filled in. You press Buy Now there
+-- yourself; Windfall never buys anything.
 local AH = C_AuctionHouse
+local showing                   -- the item last shown: { id, qty }
 
 local function Status(text)
     if shopFrame then shopFrame.status:SetText(text or "") end
 end
 
 local function StopBuying(text)
-    if buying and buying.step == "pricing" or buying and buying.step == "confirm" then
-        pcall(AH.CancelCommoditiesPurchase)
-    end
-    buying = nil
+    showing = nil
     Status(text)
-    if RefreshShoppingList then RefreshShoppingList() end
 end
 
-local function StartSearch(itemID, qty)
-    if not (AH and AH.SendSearchQuery and AH.MakeItemKey) then
-        Status("|cffff6060This auction house cannot be searched by Windfall.|r")
-        return
+-- Fills in the amount on the buy page. The game resets it once the listings
+-- arrive, so this runs again then.
+local function SetBuyQuantity()
+    local ahFrame = _G.AuctionHouseFrame
+    local display = ahFrame and ahFrame.CommoditiesBuyFrame and ahFrame.CommoditiesBuyFrame.BuyDisplay
+    if not (showing and display and display:IsShown()) then return end
+    local qty = showing.qty
+    if display.SetQuantitySelected and pcall(display.SetQuantitySelected, display, qty) then return end
+    local input = display.QuantityInput
+    if input and input.SetQuantity and pcall(input.SetQuantity, input, qty) then return end
+    local box = input and input.InputBox
+    if box and box.SetNumber then
+        box:SetNumber(qty)
+        local onChanged = box:GetScript("OnTextChanged")
+        if onChanged then pcall(onChanged, box, true) end
     end
-    StopBuying()
-    buying = { id = itemID, qty = qty, step = "searching", at = GetTime() }
-    AH.SendSearchQuery(AH.MakeItemKey(itemID), { { sortOrder = 0, reverseSort = false } }, false)
-    Status("Searching for " .. ItemName(itemID) .. "...")
-    C_Timer.After(5, function()
-        if buying and buying.id == itemID and buying.step == "searching" then
-            StopBuying("|cffff6060No answer from the auction house. Click Buy again.|r")
-        end
-    end)
-    RefreshShoppingList()
 end
 
--- What qty would cost at the cheapest commodity prices now listed.
-local function CommodityQuote(itemID, qty)
-    local total, got = 0, 0
-    for i = 1, AH.GetNumCommoditySearchResults(itemID) or 0 do
-        local r = AH.GetCommoditySearchResultInfo(itemID, i)
-        if r then
-            local take = math.min(qty - got, r.quantity)
-            total, got = total + take * r.unitPrice, got + take
-            if got >= qty then break end
-        end
-    end
-    return got, total
+local function OpenBuyPage()
+    local ahFrame = _G.AuctionHouseFrame
+    if not (showing and ahFrame and ahFrame.SelectBrowseResult and AH and AH.MakeItemKey) then return false end
+    local itemKey = AH.MakeItemKey(showing.id)
+    -- The game needs to know the item first; if not, it says so with an event.
+    if AH.GetItemKeyInfo and not AH.GetItemKeyInfo(itemKey) then return false end
+    local ok = pcall(ahFrame.SelectBrowseResult, ahFrame, { itemKey = itemKey, minPrice = 0, totalQuantity = 0 })
+    if not ok then return false end
+    C_Timer.After(0.3, SetBuyQuantity)
+    return true
 end
 
-local function OnCommodityResults(itemID)
-    if not (buying and buying.id == itemID and buying.step == "searching") then return end
-    local got, total = CommodityQuote(itemID, buying.qty)
-    if got == 0 then
-        StopBuying("|cffff6060" .. ItemName(itemID) .. ": none for sale.|r")
-        return
-    end
-    buying.commodity, buying.step, buying.buyQty, buying.quote = true, "ready", got, total
-    Status(string.format("%s: %d for %s%s. Click Buy %d to buy them.", ItemName(itemID), got, Money(total),
-        got < buying.qty and string.format(" |cffff6060(only %d listed)|r", got) or "", got))
-    RefreshShoppingList()
-end
-
-local function OnItemResults(itemKey)
-    if not (buying and itemKey and itemKey.itemID == buying.id and buying.step == "searching") then return end
-    -- Not a commodity: auctions one by one. Take the cheapest per item.
-    local best
-    for i = 1, AH.GetNumItemSearchResults(itemKey) or 0 do
-        local r = AH.GetItemSearchResultInfo(itemKey, i)
-        if r and r.buyoutAmount and (not best or r.buyoutAmount / r.quantity < best.buyoutAmount / best.quantity) then
-            best = r
-        end
-    end
-    if not best then
-        StopBuying("|cffff6060" .. ItemName(buying.id) .. ": none with a buyout.|r")
-        return
-    end
-    buying.commodity, buying.step, buying.auction = false, "ready", best
-    buying.buyQty, buying.quote = best.quantity, best.buyoutAmount
-    Status(string.format("%s: cheapest auction is %d for %s. Click Buy %d to buy it.", ItemName(buying.id),
-        best.quantity, Money(best.buyoutAmount), best.quantity))
-    RefreshShoppingList()
-end
-
--- The Buy button: each click moves the purchase one step, and nothing is
--- spent until the last click, after the auction house has said the real price.
-local function BuyClicked(itemID, qty)
+local function ShowInAuctionHouse(itemID, qty)
     if not ahOpen then return end
-    if not buying or buying.id ~= itemID then
-        StartSearch(itemID, qty)
-    elseif buying.step == "ready" and buying.commodity then
-        buying.step = "pricing"
-        AH.StartCommoditiesPurchase(itemID, buying.buyQty)
-        Status("Asking the auction house for the price...")
-    elseif buying.step == "ready" then
-        local a = buying.auction
-        buying.step = "buying"
-        AH.PlaceBid(a.auctionID, a.buyoutAmount)
-        Status("Buying...")
-        C_Timer.After(2, function()
-            if buying and buying.id == itemID and buying.step == "buying" then
-                StopBuying("Bought " .. ItemName(itemID) .. ". Click Buy for more.")
-            end
-        end)
-    elseif buying.step == "confirm" then
-        buying.step = "buying"
-        AH.ConfirmCommoditiesPurchase(itemID, buying.buyQty)
-        Status("Buying...")
+    showing = { id = itemID, qty = qty }
+    if OpenBuyPage() then
+        Status(string.format("Showing %s: buy %d in the auction house.", ItemName(itemID), qty))
+    else
+        Status("Looking up " .. ItemName(itemID) .. "...")
     end
-    RefreshShoppingList()
-end
-
-local function OnPriceUpdated(unitPrice, totalPrice)
-    if not (buying and buying.step == "pricing") then return end
-    buying.step, buying.total = "confirm", totalPrice
-    local warn = totalPrice > (buying.quote or 0) * 1.05 and " |cffff6060(went up)|r" or ""
-    Status(string.format("%d %s for %s (%s each)%s. Click Confirm to buy.", buying.buyQty, ItemName(buying.id),
-        Money(totalPrice), Money(unitPrice), warn))
-    RefreshShoppingList()
 end
 
 local function OnAuctionEvent(event, ...)
@@ -2829,7 +2766,7 @@ local function OnAuctionEvent(event, ...)
         -- Next to the auction house, but only with something left to buy.
         local anything
         for _, item in ipairs(shop.items) do
-            if item.need * (shop.crafts and shop.single and shop.crafts or 1) > BagCountOf(item.id) then anything = true end
+            if item.need * (shop.single and shop.crafts or 1) > BagCountOf(item.id) then anything = true end
         end
         if anything and shopFrame then
             shopFrame:Show()
@@ -2839,20 +2776,14 @@ local function OnAuctionEvent(event, ...)
     elseif event == "AUCTION_HOUSE_CLOSED" then
         ahOpen = false
         StopBuying()
+    elseif event == "ITEM_KEY_ITEM_INFO_RECEIVED" then
+        local itemID = ...
+        if showing and itemID == showing.id and OpenBuyPage() then
+            Status(string.format("Showing %s: buy %d in the auction house.", ItemName(itemID), showing.qty))
+        end
     elseif event == "COMMODITY_SEARCH_RESULTS_UPDATED" then
-        OnCommodityResults(...)
-    elseif event == "ITEM_SEARCH_RESULTS_UPDATED" then
-        OnItemResults(...)
-    elseif event == "COMMODITY_PRICE_UPDATED" then
-        OnPriceUpdated(...)
-    elseif event == "COMMODITY_PRICE_UNAVAILABLE" then
-        StopBuying("|cffff6060The price is no longer available. Click Buy to search again.|r")
-    elseif event == "COMMODITY_PURCHASE_SUCCEEDED" then
-        local name = buying and ItemName(buying.id) or "it"
-        buying = nil
-        Status("|cff7fd36bBought " .. name .. ".|r")
-    elseif event == "COMMODITY_PURCHASE_FAILED" then
-        StopBuying("|cffff6060The purchase failed. Click Buy to try again.|r")
+        local itemID = ...
+        if showing and itemID == showing.id then C_Timer.After(0, SetBuyQuantity) end
     end
     if RefreshShoppingList then RefreshShoppingList() end
 end
@@ -2895,18 +2826,9 @@ function RefreshShoppingList()
                 missing = true
                 row.total:SetText(buy .. " |cffff6060no price|r")
             end
-            -- Buy button, only at the auction house and only for what is left.
-            local mine = buying and buying.id == item.id
+            -- Show button, only at the auction house and only for what is left.
             row.buy:SetShown(ahOpen and buy > 0 and not (fromVendor and price))
-            if mine and buying.step == "ready" then
-                row.buy:SetText("Buy " .. buying.buyQty)
-            elseif mine and buying.step == "confirm" then
-                row.buy:SetText("|cff7fd36bConfirm|r")
-            elseif mine then
-                row.buy:SetText("...")
-            else
-                row.buy:SetText("Buy")
-            end
+            row.buy:SetText((showing and showing.id == item.id) and "|cff7fd36bShown|r" or "Show")
             row.item, row.toBuy = item.id, buy
             row:Show()
         else
@@ -2971,7 +2893,7 @@ local function BuildShoppingFrame()
         row.buy = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
         row.buy:SetSize(66, 18)
         row.buy:SetPoint("RIGHT", -2, 0)
-        row.buy:SetScript("OnClick", function() BuyClicked(row.item, row.toBuy) end)
+        row.buy:SetScript("OnClick", function() ShowInAuctionHouse(row.item, row.toBuy) end)
         f.rows[i] = row
     end
 
@@ -3016,8 +2938,7 @@ auctionEvents:SetScript("OnEvent", function(_, event, ...)
     end
 end)
 for _, event in ipairs({ "BAG_UPDATE_DELAYED", "AUCTION_HOUSE_SHOW", "AUCTION_HOUSE_CLOSED",
-    "COMMODITY_SEARCH_RESULTS_UPDATED", "ITEM_SEARCH_RESULTS_UPDATED", "COMMODITY_PRICE_UPDATED",
-    "COMMODITY_PRICE_UNAVAILABLE", "COMMODITY_PURCHASE_SUCCEEDED", "COMMODITY_PURCHASE_FAILED" }) do
+    "ITEM_KEY_ITEM_INFO_RECEIVED", "COMMODITY_SEARCH_RESULTS_UPDATED" }) do
     pcall(auctionEvents.RegisterEvent, auctionEvents, event)
 end
 
