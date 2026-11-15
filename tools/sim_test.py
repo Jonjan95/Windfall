@@ -303,9 +303,9 @@ print(rt.eval(r'''(function()
   -- node sparkles
   local function sp(label)
     local fr = sparkleShown and "sparkle shown" or "no sparkle"
-    out[#out+1] = "sparkle: "..label.." -> "..fr.." icon="..tostring(cvars.SoftTargetIconGameObject).." interact="..tostring(cvars.SoftTargetInteract).." range="..tostring(cvars.SoftTargetInteractRange).." plates="..tostring(cvars.SoftTargetNameplateInteract)
+    out[#out+1] = "sparkle: "..label.." -> "..fr.." icon="..tostring(cvars.SoftTargetIconGameObject).." interact="..tostring(cvars.SoftTargetInteract).." range="..tostring(cvars.SoftTargetInteractRange).." plates="..tostring(cvars.SoftTargetNameplateInteract).." npcIcon="..tostring(cvars.SoftTargetIconInteract)
   end
-  cvars.SoftTargetInteract = "0"; cvars.SoftTargetInteractRange = "10"; cvars.SoftTargetIconGameObject = "0"; cvars.SoftTargetNameplateInteract = "0"; cvars.SoftTargetInteractArc = "0"
+  cvars.SoftTargetInteract = "0"; cvars.SoftTargetInteractRange = "10"; cvars.SoftTargetIconGameObject = "0"; cvars.SoftTargetNameplateInteract = "0"; cvars.SoftTargetInteractArc = "0"; cvars.SoftTargetIconInteract = "1"
   sp("sparkles off by default")
   SlashCmdList.WINDFALL("sparkle"); sparkleTick(); sp("switched on, nothing near")
   soft = { guid = "GameObject-1", name = "Plaguebloom" }; sparkleTick(); sp("Plaguebloom nearby")

@@ -2,6 +2,10 @@
 
 All changes to Windfall, newest first. After an update, type `/reload` in game (or restart the game when the notes say so).
 
+## [0.2.18] - 2026-11-15
+
+- **No more icons over trainers and vendors while sparkles are on.** Sparkles make soft targeting reach all round you, so every nearby NPC got the game's interact icon. That icon is now off while sparkles are on, unless the nearest thing is a node, and comes back when you switch sparkles off.
+
 ## [0.2.17] - 2026-11-15
 
 - **Professions:** a new window (the anvil icon in the title bar, or `/wf prof`) shows every recipe a character knows with what the reagents cost, what the result sells for after the auction house cut, and the profit. Switch to *Cheapest skill-up* to see which orange, yellow and green recipes level the profession for the least gold. Open each profession window once on every character, and your alts show up too. No pop-ups.

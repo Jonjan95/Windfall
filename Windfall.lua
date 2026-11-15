@@ -999,9 +999,10 @@ local function GetCVarSafe(name)
 end
 
 -- The game's icon over the soft target, and the name plate the sparkle sits
--- on, are on only while the soft target is a node. Left on, every guard and
--- vendor you walk past would get a name plate too.
-local NODE_ONLY_CVARS = { "SoftTargetIconGameObject", "SoftTargetNameplateInteract" }
+-- on, are on only while the soft target is a node. Left on, every guard,
+-- trainer and vendor you walk past would get a name plate or an icon too,
+-- since sparkles make soft targeting reach all round you.
+local NODE_ONLY_CVARS = { "SoftTargetIconGameObject", "SoftTargetIconInteract", "SoftTargetNameplateInteract" }
 
 local function SetNodeIcon(on)
     if iconOn == on then return end
