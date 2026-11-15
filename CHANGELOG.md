@@ -2,6 +2,12 @@
 
 All changes to Windfall, newest first. After an update, type `/reload` in game (or restart the game when the notes say so).
 
+## [0.2.20] - 2026-11-15
+
+- **Levelling plan** in the Professions window (the mode button): the cheapest way up from your current skill. It mixes the recipes you know with the ones the trainer can teach you now, ranks them by what a skill point costs (a craft that sells pays for part of itself), and shows the trainer's price. Below that: the next rank to train and what the trainer teaches next. Recipe colours for recipes you have not learned are a guess until you learn them.
+- **Shopping list:** click a recipe in the Professions window for what to buy for a number of crafts, less what is in your bags, with prices. It updates as your bags fill.
+- Recipe data for Forever's trainers comes from the What's Training? addon by Sveng (MIT licence).
+
 ## [0.2.19] - 2026-11-15
 
 - **Sparkles only on what you can gather:** herbs need Herbalism, ore needs Mining and fishing pools need Fishing. A character without the profession gets no sparkle or icon for those nodes. Learning a profession counts straight away.

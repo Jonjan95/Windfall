@@ -13,7 +13,9 @@ A World of Warcraft Forever addon that shows what your farming is worth: the val
 
 ## Professions
 
-The anvil icon in the title bar (or `/wf prof`) opens a window with every recipe a character knows: what the reagents cost (the cheaper of the auction house and a vendor), what the result sells for after the 5% auction house cut, and the profit. *Cheapest skill-up* lists the recipes that can still raise your skill by what a skill point costs. Recipes are saved when you open a profession window, on every character, so alts show up too.
+The anvil icon in the title bar (or `/wf prof`) opens a window with every recipe a character knows: what the reagents cost (the cheaper of the auction house and a vendor), what the result sells for after the 5% auction house cut, and the profit. The *Levelling plan* lists the cheapest way up from your current skill, mixing the recipes you know with the ones the trainer can teach you now, and shows the next rank and the recipes that unlock next. Click a recipe for a shopping list: what to buy for a number of crafts, less what is in your bags. Recipes are saved when you open a profession window, on every character, so alts show up too.
+
+Trainer recipe data comes from **What's Training?** by Sveng (MIT licence, see `Data/THIRD_PARTY.md`); `tools/import_recipes.py` rebuilds it.
 
 ## Node sparkles
 

@@ -107,22 +107,28 @@ do local oldUN = UnitName
 function GetRealmName() return "Realm" end
 function time() return 1763200000 end
 function UnitClass() return class, class end
+playerLevel = 60
+function UnitLevel() return playerLevel end
 RAID_CLASS_COLORS = { PALADIN = { r = 0.96, g = 0.55, b = 0.73 }, MAGE = { r = 0.25, g = 0.78, b = 0.92 } }
 Enum = { CraftingReagentType = { Basic = 0 } }
 C_TradeSkillUI = {
   IsTradeSkillLinked = function() return linked end,
-  GetBaseProfessionInfo = function() return trade and { professionName = trade.name, skillLevel = trade.skill, maxSkillLevel = trade.max } end,
+  GetBaseProfessionInfo = function() return trade and { professionName = trade.name, professionID = trade.id, skillLevel = trade.skill, maxSkillLevel = trade.max } end,
   GetAllRecipeIDs = function() local t = {} for id in pairs(trade.recipes) do t[#t+1] = id end return t end,
-  GetRecipeInfo = function(id) local r = trade.recipes[id]; return { name = r.name, learned = r.learned ~= false, relativeDifficulty = r.rd } end,
-  GetRecipeSchematic = function(id) local r = trade.recipes[id]; local slots = {}
+  GetRecipeInfo = function(id) local r = trade.recipes[id]; if not r then return nil end return { name = r.name, learned = r.learned ~= false and not r.unlearned, relativeDifficulty = r.rd } end,
+  GetRecipeSchematic = function(id) local r = trade.recipes[id]; if not r then return nil end local slots = {}
     for _, g in ipairs(r.reagents) do slots[#slots+1] = { reagentType = 0, quantityRequired = g[2], reagents = { { itemID = g[1] } } } end
     return { outputItemID = r.item, quantityMin = 1, quantityMax = 1, reagentSlotSchematics = slots } end,
 }
 C_Item.GetItemNameByID = function(id) return "item"..id end
-Auctionator = { API = { v1 = { GetVendorPriceByItemID=function(_, id) if id == 2320 or id == 3371 then return 10 end end, GetAuctionPriceByItemID=function(caller,id)
-  local p={[4306]=100,[4305]=600,[2996]=50,[2320]=30,[2447]=20,[765]=15,[3371]=40,[118]=500,[13466]=2840,[10620]=4000,[8170]=900,[7909]=30000,[4306]=100} return p[id] end } } }
+Auctionator = { API = { v1 = { GetVendorPriceByItemID=function(_, id) if id == 2320 or id == 3371 then return 10 elseif id == 4289 then return 50 end end, GetAuctionPriceByItemID=function(caller,id)
+  local p={[2318]=30,[783]=20,[2302]=60,[2304]=45,[2303]=150,[4237]=130,[4231]=40,[4306]=100,[4305]=600,[2996]=50,[2320]=30,[2447]=20,[765]=15,[3371]=40,[118]=500,[13466]=2840,[10620]=4000,[8170]=900,[7909]=30000,[4306]=100} return p[id] end } } }
 ''')
-rt.execute(open(sys.argv[2], encoding="utf-8").read())
+import os
+_ns = rt.eval('{}')
+_load = rt.eval('function(src, name) return assert(loadstring(src, name)) end')
+for _path in [os.path.join(os.path.dirname(os.path.abspath(sys.argv[2])), 'Data', 'Recipes.lua'), sys.argv[2]]:
+    _load(open(_path, encoding='utf-8').read(), '=' + os.path.basename(_path))('Windfall', _ns)
 print(rt.eval(r'''(function()
   local ev = handlers[#handlers]
   local out = {}
@@ -379,5 +385,38 @@ print(rt.eval(r'''(function()
   local n = 0; for _ in pairs(WindfallDB.chars["Altie-Realm"].professions) do n = n + 1 end
   out[#out+1] = "prof: someone else's linked profession saved? Altie professions="..n.." engineering="..tostring(WindfallDB.chars["Altie-Realm"].professions.Engineering ~= nil)
   StaticPopupDialogs.WINDFALL_FORGET_PROFESSION.OnAccept(); pw("forgot the shown one")
+  -- levelling plan
+  player = "Huntie"; class = "HUNTER"; playerLevel = 10
+  bags[2318] = 12; bags[2320] = 0
+  trade = { name = "Leatherworking", id = 165, skill = 30, max = 75, recipes = {
+    [2881] = { name = "Light Leather", item = 2318, rd = 3, reagents = { {783, 3} } },
+    [2149] = { name = "Handstitched Leather Boots", item = 2302, rd = 2, reagents = { {2318, 2}, {2320, 1} } },
+    [2152] = { name = "Light Armor Kit", item = 2304, rd = 1, reagents = { {2318, 1} } },
+    [2153] = { name = "Handstitched Leather Pants", item = 2303, rd = 1, unlearned = true, reagents = { {2318, 4}, {2320, 1} } },
+    [3753] = { name = "Handstitched Leather Belt", item = 4237, rd = 0, unlearned = true, reagents = { {2318, 6}, {2320, 1} } },
+    [3816] = { name = "Cured Light Hide", item = 4231, rd = 0, unlearned = true, reagents = { {783, 1}, {4289, 1} } },
+  } }
+  ev(nil, "TRADE_SKILL_SHOW"); runTimers()
+  local P = WindfallProfessionsFrame
+  if not P:IsShown() then SlashCmdList.WINDFALL("prof") end
+  profPick = function() end
+  while P.profButton.text ~= "Leatherworking" or not tostring(P.charButton.text):find("Huntie") do
+    if not tostring(P.charButton.text):find("Huntie") then P.charButton.onOnClick(P.charButton) else P.profButton.onOnClick(P.profButton) end
+  end
+  if P.modeButton.text ~= "Levelling plan" then P.modeButton.onOnClick(P.modeButton) end
+  out[#out+1] = "plan: ["..tostring(P.charButton.text).."] ["..P.profButton.text.."] ["..P.modeButton.text.."] "..P.skill.text.." | "..tostring(P.hint.text)
+  for i = 1, 18 do local r = P.rows[i]; if r.name.text ~= "" then out[#out+1] = "      "..r.name.text.." | "..r.cost.text.." | "..r.value.text.." | "..r.profit.text end end
+  local saved = WindfallDB.recipeData or {}
+  local n = 0; for _ in pairs(saved) do n = n + 1 end
+  out[#out+1] = "plan: trainer recipes with reagents saved: "..n
+  -- shopping list for the first recipe row
+  for i = 1, 18 do local r = P.rows[i]; if r.entry and r.entry.recipe and r.entry.recipe.reagents[1] and not r.entry.kind then r.onOnClick(r); break end end
+  local S = WindfallShoppingFrame
+  local function shop(label)
+    out[#out+1] = "shop: "..label.." -> "..S.recipe.text.." / "..S.crafts.text.." / "..S.sum.text
+    for i = 1, 3 do local r = S.rows[i]; if r.name.text ~= "" then out[#out+1] = "      "..r.name.text.." | "..r.need.text.." | "..r.buy.text.." | "..r.total.text end end
+  end
+  shop("opened")
+  bags[2318] = 40; S.onOnEvent(S, "BAG_UPDATE_DELAYED"); shop("after buying leather")
   return table.concat(out, "\n")
 end)()''').replace("|cffffd700g|r","g").replace("|cffc7c7cfs|r","s").replace("|cffeda55fc|r","c"))
