@@ -26,6 +26,8 @@ local Refresh, RefreshHistory, ToggleHistory
 local ToggleSettings, RefreshSettings
 local ResetInteract
 local ToggleProfessions, RefreshProfessions
+local FISH_ICON, fishingNow, UpdateFishIcon, StartKeyCapture, ReleaseCVars, FishingSkill, OnLureCastStart, OnLureCastSucceeded, OnLureCastEnded
+local UpdateAutoLoot, SetFishing, SetFishKey, OnMainHandChanged, OnCombatEnded, OnChannelStart, OnChannelStop, InitFishing
 
 -- ---------------------------------------------------------- item helpers ----
 
@@ -369,19 +371,22 @@ end
 
 -- ---------------------------------------------------------- fishing key ----
 
+-- In a block of its own: the game allows a file at most 200 locals at the top.
+do
+
 -- One key for fishing, switched on and off at will. While it is on, the key
 -- is taken over: a press casts Fishing, and while the line is out the same
 -- key interacts with the bobber instead. Switched off, the key does whatever
 -- it normally does. Every cast and every reel is still one key press.
 
 local FISHING_SPELL_IDS = { 7620, 131474, 131476 }
-local FISH_ICON = "Interface\\Icons\\Trade_Fishing"
+FISH_ICON = "Interface\\Icons\\Trade_Fishing"
 local fishingName
-local fishingNow = false    -- a Fishing channel is running
+fishingNow = false    -- a Fishing channel is running
 local reelEndedAt = 0       -- when the line last came in
 local bindOwner = CreateFrame("Frame")
 local bindPending = false   -- a binding change is waiting for combat to end
-local UpdateFishIcon, StartKeyCapture
+
 
 -- Lets the interact key reach the bobber from any angle while the line is
 -- out. Changed for the length of a cast and put back afterwards.
@@ -421,7 +426,7 @@ local function LeaseCVars()
 end
 
 -- Each setting goes back only if nothing else changed it in the meantime.
-local function ReleaseCVars()
+function ReleaseCVars()
     local used = next(cvarLease) ~= nil
     for name, lease in pairs(cvarLease) do
         if C_CVar.GetCVar(name) == lease.ours then
@@ -440,7 +445,7 @@ fishButton:SetAttribute("type", "spell")
 -- casting. Using an item is still the player's own key press.
 -- Fishing skill: rank, rank cap and bonus from lure and pole, or nil if the
 -- character has not learned Fishing (or the game will not say).
-local function FishingSkill()
+function FishingSkill()
     if GetProfessions and GetProfessionInfo then
         local _, _, _, fishing = GetProfessions()
         if fishing then
@@ -566,14 +571,14 @@ local function LurePress()
     return string.format("/use item:%d\n/use %d", lure.id, MAIN_HAND)
 end
 
-local function OnLureCastStart(spellID)
+function OnLureCastStart(spellID)
     if lureBySpell[spellID] then
         lureCasting, lureCastingAt = true, GetTime()
         lureTried = nil
     end
 end
 
-local function OnLureCastSucceeded(spellID)
+function OnLureCastSucceeded(spellID)
     local lure = lureBySpell[spellID]
     if not lure then return end
     lureCasting = false
@@ -582,7 +587,7 @@ local function OnLureCastSucceeded(spellID)
     lureFailures = {}
 end
 
-local function OnLureCastEnded()
+function OnLureCastEnded()
     lureCasting = false
 end
 
@@ -738,7 +743,7 @@ end
 -- Auto loot is switched on for as long as the fishing key is on.
 local lootLease
 
-local function UpdateAutoLoot(forceOff)
+function UpdateAutoLoot(forceOff)
     if not (C_CVar and C_CVar.GetCVar and C_CVar.SetCVar) then return end
     local want = not forceOff and db.fishOn and db.fishLoot ~= false
     if want and not lootLease then
@@ -756,7 +761,7 @@ local function UpdateAutoLoot(forceOff)
 end
 
 -- keepGear = true leaves your weapons as they are when switching off.
-local function SetFishing(on, keepGear)
+function SetFishing(on, keepGear)
     if on and not fishingName then
         Announce("this character does not know Fishing.")
         return
@@ -784,7 +789,7 @@ local function SetFishing(on, keepGear)
     UpdateFishIcon()
 end
 
-local function SetFishKey(key)
+function SetFishKey(key)
     db.fishKey = key:upper()
     db.fishOn = false
     reelEndedAt = GetTime() -- letting go of the key just picked is not a cast
@@ -807,7 +812,7 @@ local function FishIdleCheck()
     end
 end
 
-local function OnMainHandChanged()
+function OnMainHandChanged()
     if db.fishSleep == false then return end
     local pole = MainHandIsPole()
     if pole and not db.fishOn and db.fishKey and fishingName then
@@ -817,7 +822,7 @@ local function OnMainHandChanged()
     end
 end
 
-local function OnCombatEnded()
+function OnCombatEnded()
     if bindPending then ApplyFishBinding() end
     local pending = gearPending
     gearPending = nil
@@ -828,7 +833,7 @@ local function OnCombatEnded()
     end
 end
 
-local function OnChannelStart(spellID)
+function OnChannelStart(spellID)
     if not (db.fishOn and fishingName and spellID) then return end
     local ok, name = pcall(C_Spell.GetSpellName, spellID)
     if not (ok and name == fishingName) then return end
@@ -838,7 +843,7 @@ local function OnChannelStart(spellID)
     ApplyFishBinding()
 end
 
-local function OnChannelStop()
+function OnChannelStop()
     if not fishingNow then return end
     fishingNow = false
     reelEndedAt = GetTime()
@@ -847,7 +852,7 @@ local function OnChannelStop()
     ApplyFishBinding()
 end
 
-local function InitFishing()
+function InitFishing()
     if C_Spell and C_Spell.GetSpellName then
         for _, id in ipairs(FISHING_SPELL_IDS) do
             local ok, name = pcall(C_Spell.GetSpellName, id)
@@ -941,6 +946,8 @@ BINDING_HEADER_WINDFALL = "Windfall"
 BINDING_NAME_WINDFALL_FISHTOGGLE = "Fishing key on / off"
 BINDING_NAME_WINDFALL_WINDOW = "Show or hide the window"
 BINDING_NAME_WINDFALL_SPARKLE = "Node sparkles on / off"
+
+end
 
 -- ------------------------------------------------------------- sparkles ----
 
@@ -1930,7 +1937,7 @@ end
 
 -- ---------------------------------------------------------- professions ----
 local DIFFICULTY_COLOR, ReagentPrice, CraftNumbers, SKILL_CHANCE, TRAIN_SPREAD, GuessDifficulty, TrainerRecipe
-local RouteTarget, ROUTE_TARGETS
+local RouteTarget, ROUTE_TARGETS, RebuildRoute
 -- In a block of its own: the game allows a file at most 200 locals at the top.
 do
 
@@ -2057,6 +2064,8 @@ function SaveProfessionSoon()
         professionSavePending = false
         SaveProfession()
         if RefreshProfessions then RefreshProfessions() end
+        -- The route moves on as your skill goes up.
+        if RebuildRoute then RebuildRoute() end
     end)
 end
 
@@ -2420,7 +2429,7 @@ local function BuildProfessionsFrame()
             profView.target = nextTarget or RouteTarget(prof.skill or 1)
             RefreshProfessions()
         else
-            ShowRoute(prof, profView.prof, target)
+            ShowRoute(prof, profView.prof, target, profView.char)
         end
     end)
     f.route:SetScript("OnEnter", function(self)
@@ -2692,6 +2701,8 @@ local SHOP_STEP_ROWS = 8
 local SHOP_ROWS = 10
 local SHOP_WIDTH = 520
 local ahOpen = false
+local merchantOpen, merchantItems = false, {} -- the vendor window, and what it sells
+local ScanMerchant, ToBuy
 local RefreshShoppingList, DockToAuctionHouse
 
 local function BagCountOf(itemID)
@@ -2776,6 +2787,24 @@ local function OnAuctionEvent(event, ...)
     elseif event == "AUCTION_HOUSE_CLOSED" then
         ahOpen = false
         StopBuying()
+    elseif event == "MERCHANT_SHOW" or event == "MERCHANT_UPDATE" then
+        merchantOpen = true
+        ScanMerchant()
+        -- Next to the vendor, when it sells something still to buy.
+        local wanted
+        for _, item in ipairs(shop.items) do
+            if merchantItems[item.id] and ToBuy(item) > 0 then wanted = true end
+        end
+        if event == "MERCHANT_SHOW" and wanted and shopFrame then
+            shopFrame:Show()
+            if _G.MerchantFrame then
+                shopFrame:ClearAllPoints()
+                shopFrame:SetPoint("TOPLEFT", _G.MerchantFrame, "TOPRIGHT", 8, 0)
+            end
+        end
+    elseif event == "MERCHANT_CLOSED" then
+        merchantOpen = false
+        merchantItems = {}
     elseif event == "ITEM_KEY_ITEM_INFO_RECEIVED" then
         local itemID = ...
         if showing and itemID == showing.id and OpenBuyPage() then
@@ -2786,6 +2815,109 @@ local function OnAuctionEvent(event, ...)
         if showing and itemID == showing.id then C_Timer.After(0, SetBuyQuantity) end
     end
     if RefreshShoppingList then RefreshShoppingList() end
+end
+
+-- -------------------------------------------------------------- vendor ------
+
+-- At a vendor, what it sells from the list can be bought straight away.
+
+function ScanMerchant()
+    merchantItems = {}
+    if not (merchantOpen and GetMerchantNumItems and GetMerchantItemID) then return end
+    for i = 1, GetMerchantNumItems() do
+        local id = GetMerchantItemID(i)
+        if id then merchantItems[id] = i end
+    end
+end
+
+local function MerchantPrice(index)
+    if C_MerchantFrame and C_MerchantFrame.GetItemInfo then
+        local info = C_MerchantFrame.GetItemInfo(index)
+        if info then return info.price, info.stackCount or 1 end
+    elseif GetMerchantItemInfo then
+        local _, _, price, stackCount = GetMerchantItemInfo(index)
+        return price, stackCount or 1
+    end
+end
+
+-- Buys qty of an item from the open vendor, in as few purchases as it allows.
+local function BuyFromVendor(itemID, qty)
+    local index = merchantItems[itemID]
+    if not (merchantOpen and index and qty > 0) then return 0 end
+    local price, stackCount = MerchantPrice(index)
+    stackCount = math.max(1, stackCount or 1)
+    local cost = price and math.ceil(qty / stackCount) * price or 0
+    if GetMoney and cost > GetMoney() then
+        Status("|cffff6060Not enough money for " .. qty .. " " .. ItemName(itemID) .. " (" .. Money(cost) .. ").|r")
+        return 0
+    end
+    local maxStack = (GetMerchantItemMaxStack and GetMerchantItemMaxStack(index)) or qty
+    local left = qty
+    while left > 0 do
+        local n = math.min(left, math.max(1, maxStack))
+        BuyMerchantItem(index, n)
+        left = left - n
+    end
+    return cost
+end
+
+function ToBuy(item)
+    local need = item.need * (shop.single and shop.crafts or 1)
+    return math.max(0, need - BagCountOf(item.id))
+end
+
+local function BuyAllHere()
+    local spent, count = 0, 0
+    for _, item in ipairs(shop.items) do
+        local buy = ToBuy(item)
+        if buy > 0 and merchantItems[item.id] then
+            local cost = BuyFromVendor(item.id, buy)
+            if cost > 0 then spent, count = spent + cost, count + 1 end
+        end
+    end
+    if count > 0 then Status("Bought everything on the list this vendor sells, for " .. Money(spent) .. ".") end
+end
+
+-- ------------------------------------------------------------ crafting ------
+
+-- The route's current step, crafted from this window. Opening the profession
+-- and crafting both happen on your click, as the game requires.
+local function RouteProfession()
+    local r = shop.route
+    local char = r and db.chars and db.chars[r.char]
+    return char and char.professions[r.name], r
+end
+
+local function CraftableCount(recipe)
+    local n
+    for _, rg in ipairs(recipe.reagents) do
+        local can = math.floor(BagCountOf(rg[1]) / rg[2])
+        n = n and math.min(n, can) or can
+    end
+    return n or 0
+end
+
+local function ProfessionIsOpen(line)
+    local T = C_TradeSkillUI
+    if not (T and T.IsTradeSkillReady and T.IsTradeSkillReady()) then return false end
+    local base = T.GetBaseProfessionInfo and T.GetBaseProfessionInfo()
+    return base and SkillLineOf(base) == line
+end
+
+local function CraftNow()
+    local now = shop.now
+    local prof = RouteProfession()
+    if not (now and now.p and prof) then return end
+    local T = C_TradeSkillUI
+    if not ProfessionIsOpen(prof.line) then
+        if T and T.OpenTradeSkill then T.OpenTradeSkill(prof.line) end
+        Status("Opened " .. shop.route.name .. ". Click Craft again.")
+        return
+    end
+    local count = math.min(now.crafts, CraftableCount(now.p.recipe))
+    if count < 1 then return end
+    T.CraftRecipe(now.p.id, count)
+    Status(string.format("Crafting %d %s...", count, now.p.recipe.name or "?"))
 end
 
 -- ------------------------------------------------------------ window ------
@@ -2799,12 +2931,42 @@ function RefreshShoppingList()
     f.plus:SetShown(shop.single)
     if shop.single then f.crafts:SetText(shop.crafts .. " crafts") end
 
-    for i, row in ipairs(f.lines) do row:SetText(shop.lines[i] or "") end
-    local top = -58 - #shop.lines * 14
+    -- The step to do now (routes only).
+    local now, prof = shop.now, RouteProfession()
+    local nowShown = not shop.single and now ~= nil
+    f.now:SetShown(nowShown)
+    f.craft:Hide()
+    if nowShown and now.rank then
+        f.now:SetText(string.format("|cffffd100Now:|r train %s at a trainer (skill %d).", now.rank, now.at))
+    elseif nowShown and now.p then
+        local recipe = now.p.recipe
+        local known = prof and prof.recipes[now.p.id]
+        local name = (DIFFICULTY_COLOR[known and known.diff or recipe.diff] or "") .. (recipe.name or "?") .. "|r"
+        if not known then
+            f.now:SetText(string.format("|cffffd100Now:|r learn %s at the trainer (%s), then craft %d.",
+                name, Money(now.p.train or 0), now.crafts))
+        else
+            local can = math.min(now.crafts, CraftableCount(recipe))
+            f.now:SetText(string.format("|cffffd100Now:|r %s x%d  |cff888888(skill %d-%d)|r", name, now.crafts, now.from, now.to))
+            f.craft:SetText(can > 0 and ("Craft " .. can) or "Need materials")
+            f.craft:SetEnabled(can > 0)
+            f.craft:Show()
+        end
+    elseif nowShown then
+        f.now:SetText("|cff7fd36bDone: you reached " .. (shop.route and shop.route.target or "") .. ".|r")
+    end
+
+    local lineTop = nowShown and -84 or -56
+    for i, row in ipairs(f.lines) do
+        row:ClearAllPoints()
+        row:SetPoint("TOPLEFT", 14, lineTop - (i - 1) * 14)
+        row:SetText(shop.lines[i] or "")
+    end
+    local top = lineTop - 2 - #shop.lines * 14
     f.matHead:ClearAllPoints()
     f.matHead:SetPoint("TOPLEFT", 12, top - 4)
 
-    local total, missing = 0, false
+    local total, missing, anyHere = 0, false, false
     for i, row in ipairs(f.rows) do
         local item = shop.items[i]
         local y = top - 22 - (i - 1) * 20
@@ -2826,9 +2988,17 @@ function RefreshShoppingList()
                 missing = true
                 row.total:SetText(buy .. " |cffff6060no price|r")
             end
-            -- Show button, only at the auction house and only for what is left.
-            row.buy:SetShown(ahOpen and buy > 0 and not (fromVendor and price))
-            row.buy:SetText((showing and showing.id == item.id) and "|cff7fd36bShown|r" or "Show")
+            -- At a vendor that sells it: Buy. At the auction house: Show.
+            if merchantOpen and merchantItems[item.id] and buy > 0 then
+                row.vendor = true
+                row.buy:SetText("Buy " .. buy)
+                row.buy:Show()
+                anyHere = true
+            else
+                row.vendor = false
+                row.buy:SetShown(ahOpen and buy > 0 and not (fromVendor and price))
+                row.buy:SetText((showing and showing.id == item.id) and "|cff7fd36bShown|r" or "Show")
+            end
             row.item, row.toBuy = item.id, buy
             row:Show()
         else
@@ -2836,6 +3006,7 @@ function RefreshShoppingList()
         end
     end
     f.sum:SetText("Left to buy: " .. Money(total) .. (missing and " |cffff6060+ unpriced|r" or ""))
+    f.buyAll:SetShown(anyHere)
     f:SetHeight(-top + 22 + #shop.items * 20 + 70)
 end
 
@@ -2865,10 +3036,18 @@ local function BuildShoppingFrame()
     f.crafts:SetPoint("TOPRIGHT", -46, -35)
     f.minus = Step("-", -1, -108)
 
+    f.now = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    f.now:SetPoint("TOPLEFT", 14, -60)
+    f.now:SetWidth(SHOP_WIDTH - 160)
+    f.now:SetJustifyH("LEFT")
+    f.craft = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    f.craft:SetSize(130, 22)
+    f.craft:SetPoint("TOPRIGHT", -12, -54)
+    f.craft:SetScript("OnClick", function() CraftNow() end)
+
     f.lines = {}
     for i = 1, SHOP_STEP_ROWS do
         local line = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        line:SetPoint("TOPLEFT", 14, -56 - (i - 1) * 14)
         line:SetWidth(SHOP_WIDTH - 28)
         line:SetJustifyH("LEFT")
         line:SetWordWrap(false)
@@ -2893,12 +3072,24 @@ local function BuildShoppingFrame()
         row.buy = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
         row.buy:SetSize(66, 18)
         row.buy:SetPoint("RIGHT", -2, 0)
-        row.buy:SetScript("OnClick", function() ShowInAuctionHouse(row.item, row.toBuy) end)
+        row.buy:SetScript("OnClick", function()
+            if row.vendor then
+                local cost = BuyFromVendor(row.item, row.toBuy)
+                if cost > 0 then Status("Bought " .. row.toBuy .. " " .. ItemName(row.item) .. " for " .. Money(cost) .. ".") end
+            else
+                ShowInAuctionHouse(row.item, row.toBuy)
+            end
+        end)
         f.rows[i] = row
     end
 
     f.sum = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     f.sum:SetPoint("BOTTOMLEFT", 12, 34)
+    f.buyAll = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    f.buyAll:SetSize(130, 22)
+    f.buyAll:SetPoint("BOTTOMRIGHT", -10, 28)
+    f.buyAll:SetText("Buy all here")
+    f.buyAll:SetScript("OnClick", function() BuyAllHere() end)
     f.status = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     f.status:SetPoint("BOTTOMLEFT", 12, 12)
     f.status:SetWidth(SHOP_WIDTH - 24)
@@ -2924,6 +3115,8 @@ local function OpenShopping()
     local ahFrame = _G.AuctionHouseFrame
     ahOpen = ahFrame and ahFrame:IsShown() and true or false
     if ahOpen then DockToAuctionHouse() end
+    merchantOpen = _G.MerchantFrame and _G.MerchantFrame:IsShown() and true or false
+    ScanMerchant()
     shopFrame:Show()
     RefreshShoppingList()
 end
@@ -2938,42 +3131,69 @@ auctionEvents:SetScript("OnEvent", function(_, event, ...)
     end
 end)
 for _, event in ipairs({ "BAG_UPDATE_DELAYED", "AUCTION_HOUSE_SHOW", "AUCTION_HOUSE_CLOSED",
-    "ITEM_KEY_ITEM_INFO_RECEIVED", "COMMODITY_SEARCH_RESULTS_UPDATED" }) do
+    "ITEM_KEY_ITEM_INFO_RECEIVED", "COMMODITY_SEARCH_RESULTS_UPDATED",
+    "MERCHANT_SHOW", "MERCHANT_UPDATE", "MERCHANT_CLOSED" }) do
     pcall(auctionEvents.RegisterEvent, auctionEvents, event)
 end
 
 -- One recipe, a number of crafts.
 function ShowShoppingList(recipe)
-    shop.single, shop.lines = true, {}
+    shop.single, shop.lines, shop.route, shop.now = true, {}, nil, nil
     shop.title = (DIFFICULTY_COLOR[recipe.diff] or "|cffffffff") .. (recipe.name or "?") .. "|r"
     shop.items = {}
     for _, r in ipairs(recipe.reagents) do shop.items[#shop.items + 1] = { id = r[1], need = r[2] } end
     OpenShopping()
 end
 
--- A whole route, up to target.
-function ShowRoute(prof, profName, target)
-    local steps, items, trainCost, gaps = BuildRoute(prof, target)
+-- A whole route, up to target. Remembered, so it can move on as you level.
+local function FillRoute(keepStatus)
+    local prof, r = RouteProfession()
+    if not prof then return end
+    local steps, items, trainCost, gaps = BuildRoute(prof, r.target)
     shop.single = false
-    shop.title = string.format("%s %d to %d", profName, prof.skill or 1, target)
+    shop.title = string.format("%s %d to %d", r.name, prof.skill or 1, r.target)
     shop.lines = {}
-    for _, s in ipairs(steps) do
-        if #shop.lines >= SHOP_STEP_ROWS - 1 then break end
-        if s.rank then
-            shop.lines[#shop.lines + 1] = string.format("|cffffd100%d: train %s|r", s.at, s.rank)
-        else
-            shop.lines[#shop.lines + 1] = string.format("%d-%d: %s%s|r x%d%s", s.from, s.to,
-                DIFFICULTY_COLOR[GuessDifficulty(s.p.unlock, s.from)] or "", s.p.recipe.name or "?",
-                math.ceil(s.crafts - 0.001), s.p.train > 0 and " |cff888888(train)|r" or "")
+    shop.now = nil
+    for _, st in ipairs(steps) do
+        if not shop.now then
+            if st.rank then
+                shop.now = { rank = st.rank, at = st.at }
+            else
+                shop.now = { p = st.p, crafts = math.ceil(st.crafts - 0.001), from = st.from, to = st.to }
+            end
+        end
+        if #shop.lines < SHOP_STEP_ROWS - 1 then
+            if st.rank then
+                shop.lines[#shop.lines + 1] = string.format("|cffffd100%d: train %s|r", st.at, st.rank)
+            else
+                shop.lines[#shop.lines + 1] = string.format("%d-%d: %s%s|r x%d%s", st.from, st.to,
+                    DIFFICULTY_COLOR[GuessDifficulty(st.p.unlock, st.from)] or "", st.p.recipe.name or "?",
+                    math.ceil(st.crafts - 0.001), st.p.train > 0 and " |cff888888(train)|r" or "")
+            end
         end
     end
+    shop.now = shop.now or { finished = true }
     if #steps > #shop.lines then shop.lines[#shop.lines + 1] = "|cff888888... and more steps|r" end
     if gaps[1] then
         shop.lines[#shop.lines] = string.format("|cffff6060No priced recipe from %d. Scan the auction house.|r", gaps[1])
     end
     shop.items = items
+    if not keepStatus and trainCost > 0 then
+        Status("Trainer recipes on this route: " .. Money(trainCost) .. ". Counts are an estimate.")
+    end
+end
+
+function ShowRoute(prof, profName, target, charKey)
+    shop.route = { char = charKey, name = profName, target = target }
     OpenShopping()
-    if trainCost > 0 then Status("Trainer recipes on this route: " .. Money(trainCost) .. ". Counts are an estimate.") end
+    FillRoute()
+    RefreshShoppingList()
+end
+
+function RebuildRoute()
+    if shop.single or not shop.route or not (shopFrame and shopFrame:IsShown()) then return end
+    FillRoute(true)
+    RefreshShoppingList()
 end
 end
 

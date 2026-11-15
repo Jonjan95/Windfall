@@ -46,6 +46,7 @@ local function widget()
     if k=="GetStringHeight" then return function() return 300 end end
     if k=="AddLine" then return function(s,t) tipLines[#tipLines+1]=tostring(t) end end
     if k=="AddDoubleLine" then return function(s,a,b) tipLines[#tipLines+1]=tostring(a).." = "..tostring(b) end end
+    if k=="SetEnabled" then return function(s,v) s.enabled=v end end
     if k=="SetHeight" then return function(s,x) s.h=x end end
     return function() end
   end})
@@ -116,6 +117,8 @@ C_TradeSkillUI = {
   IsTradeSkillLinked = function() return linked end,
   OpenTradeSkill = function(line) openedLines[#openedLines+1] = line end,
   CloseTradeSkill = function() closedTrade = true end,
+  IsTradeSkillReady = function() return tradeReady end,
+  CraftRecipe = function(id, n) craftedRecipe, craftedCount = id, n end,
   GetBaseProfessionInfo = function() return trade and { professionName = trade.name, professionID = trade.id, skillLevel = trade.skill, maxSkillLevel = trade.max } end,
   GetAllRecipeIDs = function() local t = {} for id in pairs(trade.recipes) do t[#t+1] = id end return t end,
   GetRecipeInfo = function(id) local r = trade.recipes[id]; if not r then return nil end return { name = r.name, learned = r.learned ~= false and not r.unlearned, relativeDifficulty = r.rd } end,
@@ -134,6 +137,13 @@ C_AuctionHouse = {
   ConfirmCommoditiesPurchase = function(id, qty) confirmedQty = qty end,
   CancelCommoditiesPurchase = function() end,
 }
+merchant = {} buys = {} tradeReady = false craftedRecipe = nil craftedCount = nil openedLines = {}
+function GetMerchantNumItems() return #merchant end
+function GetMerchantItemID(i) return merchant[i] end
+function GetMerchantItemMaxStack() return 20 end
+C_MerchantFrame = { GetItemInfo = function(i) return { price = 10, stackCount = 1 } end }
+function BuyMerchantItem(i, n) buys[#buys+1] = n; bags[merchant[i]] = (bags[merchant[i]] or 0) + n end
+function GetMoney() return 1000000 end
 Auctionator = { API = { v1 = { GetVendorPriceByItemID=function(_, id) if id == 2320 or id == 3371 then return 10 elseif id == 4289 then return 50 end end, GetAuctionPriceByItemID=function(caller,id)
   local p={[2318]=30,[783]=20,[2302]=60,[2304]=45,[2303]=150,[4237]=130,[4231]=40,[4306]=100,[4305]=600,[2996]=50,[2320]=30,[2447]=20,[765]=15,[3371]=40,[118]=500,[13466]=2840,[10620]=4000,[8170]=900,[7909]=30000,[4306]=100} return p[id] end } } }
 ''')
@@ -467,6 +477,28 @@ print(rt.eval(r'''(function()
   out[#out+1] = "ah: listings arrived, amount filled again="..tostring(shownQty)
   out[#out+1] = "ah: anything bought by Windfall? started="..tostring(startedQty).." confirmed="..tostring(confirmedQty)
   ev2(S, "AUCTION_HOUSE_CLOSED"); sh("AH closed")
+  -- vendor buying and crafting from the route window
+  local S = WindfallShoppingFrame
+  local function g(label)
+    out[#out+1] = "guide: "..label.." -> now: "..tostring(S.now:IsShown() and S.now.text).." | craft: "..(S.craft:IsShown() and tostring(S.craft.text) or "-").." | buy all: "..tostring(S.buyAll:IsShown()).." | status: "..tostring(S.status.text)
+    for i = 1, 6 do local r = S.rows[i]; if r:IsShown() then out[#out+1] = "      mat "..r.name.text.." | "..r.need.text.." | buy="..(r.buy:IsShown() and r.buy.text or "-") end end
+  end
+  g("route open")
+  -- at a vendor that sells Coarse Thread (2320), 10c each, up to 20 per purchase
+  merchant = { 2320 }; MerchantFrame = CreateFrame("Frame"); MerchantFrame.shown = true; buys = {}
+  ev2(S, "MERCHANT_SHOW"); g("at the thread vendor")
+  S.buyAll.onOnClick(S.buyAll); ev2(S, "BAG_UPDATE_DELAYED")
+  out[#out+1] = "guide: vendor purchases "..table.concat(buys, ",").." -> thread in bags "..tostring(bags[2320])
+  g("after Buy all here")
+  ev2(S, "MERCHANT_CLOSED"); MerchantFrame.shown = false
+  -- craft: profession window not open yet, then open
+  bags[2318] = 200; ev2(S, "BAG_UPDATE_DELAYED"); g("leather in bags")
+  tradeReady = false; S.craft.onOnClick(S.craft)
+  out[#out+1] = "guide: first Craft click opened skill line "..tostring(openedLines[#openedLines]).." crafted="..tostring(craftedRecipe)
+  tradeReady = true; S.craft.onOnClick(S.craft)
+  out[#out+1] = "guide: second Craft click crafted recipe "..tostring(craftedRecipe).." x"..tostring(craftedCount).." | status: "..tostring(S.status.text)
+  -- skill goes up: the route moves on
+  trade.skill = 40; ev(nil, "TRADE_SKILL_LIST_UPDATE"); runTimers(); g("skill went up to 40")
   -- forget needs shift, load brings it back
   local P = WindfallProfessionsFrame
   if WindfallShoppingFrame then WindfallShoppingFrame:Hide() end

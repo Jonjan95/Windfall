@@ -2,6 +2,11 @@
 
 All changes to Windfall, newest first. After an update, type `/reload` in game (or restart the game when the notes say so).
 
+## [0.2.27] - 2026-11-15
+
+- **Buy from vendors:** with a shopping list open at a vendor that sells something on it (Coarse Thread, for example), that row gets a Buy button for exactly what you still need, and *Buy all here* buys everything the vendor has on your list. The list docks next to the vendor window.
+- **Craft from the route:** a route now shows the step to do now at the top, e.g. "Light Armor Kit x14", with a Craft button. The first click opens your profession window if it is closed, the next crafts as many as your bags allow. As your skill goes up the route moves on to the next step by itself, and tells you when to visit the trainer for a new recipe or rank.
+
 ## [0.2.26] - 2026-11-15
 
 - **Show instead of Buy:** at the auction house, a material's Show button now opens its page in the auction house itself, with the amount you still need filled in. You look at the listings and press Buy Now there. Windfall no longer buys anything on its own.
