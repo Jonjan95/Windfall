@@ -1,0 +1,8 @@
+<Bindings>
+	<Binding name="WINDFALL_FISHTOGGLE" header="WINDFALL" category="ADDONS">
+		Windfall_ToggleFishing()
+	</Binding>
+	<Binding name="WINDFALL_WINDOW" category="ADDONS">
+		Windfall_ToggleWindow()
+	</Binding>
+</Bindings>
