@@ -1,11 +1,12 @@
 ## Interface: 16001
-## Title: Windfall |cff999999v0.2.28|r
+## Title: Windfall |cff999999v0.2.29|r
 ## Notes: Shows the value of what you gather or loot and your gold per hour, using Auctionator prices.
 ## Author: Jonis
-## Version: 0.2.28
+## Version: 0.2.29
 ## IconTexture: Interface\AddOns\Windfall\Media\icon
 ## OptionalDeps: Auctionator
 ## SavedVariables: WindfallDB
 
 Data\Recipes.lua
+Data\SkillUps.lua
 Windfall.lua

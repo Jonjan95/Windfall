@@ -1937,7 +1937,7 @@ end
 
 -- ---------------------------------------------------------- professions ----
 local DIFFICULTY_COLOR, ReagentPrice, CraftNumbers, SKILL_CHANCE, TRAIN_SPREAD, GuessDifficulty, TrainerRecipe
-local SyncLearned
+local SyncLearned, SkillUpChance, PointCost, MIN_CHANCE
 local RouteTarget, ROUTE_TARGETS, RebuildRoute
 -- In a block of its own: the game allows a file at most 200 locals at the top.
 do
@@ -2201,6 +2201,37 @@ function GuessDifficulty(unlockAt, skill)
     return "trivial"
 end
 
+-- Chance that one craft gives a skill point, and the recipe's colour, at a
+-- skill. Uses the game's own yellow and grey levels where Windfall has them
+-- (Data/SkillUps.lua): a point every time until yellow, then less in a
+-- straight line down to nothing at grey. Without them, a guess from the
+-- recipe's unlock skill.
+function SkillUpChance(spell, unlock, skill)
+    if unlock and skill < unlock then return 0, nil end
+    local t = ns.SkillUps and ns.SkillUps[spell]
+    if t then
+        local yellow, grey = t[1], t[2]
+        if skill >= grey then return 0, "trivial" end
+        if skill < yellow then return 1, "optimal" end
+        local diff = skill < (yellow + grey) / 2 and "medium" or "easy"
+        return (grey - skill) / (grey - yellow), diff
+    end
+    local diff = GuessDifficulty(unlock or skill, skill)
+    return SKILL_CHANCE[diff] or 0, diff
+end
+
+-- What a skill point costs with a recipe. What the craft sells for comes off,
+-- but levelling never counts as earning (that made low-chance crafts look
+-- good), and every craft carries a little effort (a tenth of its materials),
+-- so a sure point beats many tries.
+MIN_CHANCE = 0.5        -- below this, a recipe is only used when nothing better is left
+local EFFORT = 0.1
+
+function PointCost(cost, value, chance)
+    if not chance or chance <= 0 then return nil end
+    return (math.max(cost - (value or 0), 0) + cost * EFFORT) / chance
+end
+
 function TrainerRecipe(entry)
     local data = db.recipeData and db.recipeData[entry[1]]
     return {
@@ -2223,7 +2254,7 @@ function SyncLearned(prof, charKey)
         local spell = entry[1]
         if not entry.rank and not prof.recipes[spell] and IsPlayerSpell(spell) then
             local recipe = TrainerRecipe(entry)
-            recipe.diff = GuessDifficulty(entry[2], prof.skill or 1)
+            recipe.diff = select(2, SkillUpChance(spell, entry[2], prof.skill or 1)) or "trivial"
             recipe.noReagents = nil
             prof.recipes[spell] = recipe
             added = true
@@ -2236,18 +2267,29 @@ local function BuildPlan(prof, char)
     local skill = prof.skill or 0
     local trainer = prof.line and ns.TrainerRecipes[prof.line] or {}
     local choices = {}
+    local unlockAt = {}
+    for _, entry in ipairs(trainer) do
+        if not entry.rank then unlockAt[entry[1]] = entry[2] end
+    end
     for recipeID, recipe in pairs(prof.recipes) do
-        if SKILL_CHANCE[recipe.diff] then
-            choices[#choices + 1] = { id = recipeID, recipe = recipe, train = 0 }
+        local chance
+        if ns.SkillUps and ns.SkillUps[recipeID] then
+            chance = SkillUpChance(recipeID, nil, skill)
+        else
+            chance = SKILL_CHANCE[recipe.diff] -- the game's colour, no exact numbers
+        end
+        if chance and chance > 0 then
+            choices[#choices + 1] = { id = recipeID, recipe = recipe, train = 0, chance = chance }
         end
     end
     for _, entry in ipairs(trainer) do
         if not entry.rank and entry[2] <= skill and not prof.recipes[entry[1]] then
-            local diff = GuessDifficulty(entry[2], skill)
-            if SKILL_CHANCE[diff] then
+            local chance, diff = SkillUpChance(entry[1], entry[2], skill)
+            if chance > 0 then
                 local recipe = TrainerRecipe(entry)
                 recipe.diff = diff
-                choices[#choices + 1] = { id = entry[1], recipe = recipe, train = entry[3], guess = true }
+                choices[#choices + 1] = { id = entry[1], recipe = recipe, train = entry[3], chance = chance,
+                    guess = not (ns.SkillUps and ns.SkillUps[entry[1]]) }
             end
         end
     end
@@ -2255,11 +2297,13 @@ local function BuildPlan(prof, char)
         e.cost, e.value, e.profit, e.missing = CraftNumbers(e.recipe)
         e.missing = e.missing or e.recipe.noReagents
         if not e.missing then
-            e.perPoint = (e.cost - (e.value or 0)) / SKILL_CHANCE[e.recipe.diff] + e.train / TRAIN_SPREAD
+            e.perPoint = PointCost(e.cost, e.value, e.chance) + e.train / TRAIN_SPREAD
         end
     end
     table.sort(choices, function(a, b)
         if (a.perPoint ~= nil) ~= (b.perPoint ~= nil) then return a.perPoint ~= nil end
+        local aSure, bSure = a.chance >= MIN_CHANCE, b.chance >= MIN_CHANCE
+        if aSure ~= bSure then return aSure end
         if a.perPoint and a.perPoint ~= b.perPoint then return a.perPoint < b.perPoint end
         return (a.recipe.name or "") < (b.recipe.name or "")
     end)
@@ -2582,7 +2626,8 @@ function RefreshProfessions()
             row.name:SetText(string.format("|cff888888%d|r  %s", e.entry[2], e.recipe.name or "?"))
             row.cost:SetText("|cff888888train|r " .. Money(e.entry[3]))
         else
-            local train = (e.train or 0) > 0 and " |cff888888(train)|r" or ""
+            local train = ((e.train or 0) > 0 and " |cff888888(train)|r" or "")
+                .. ((e.chance and e.chance < 1) and string.format(" |cff888888%d%%|r", math.floor(e.chance * 100 + 0.5)) or "")
             row.name:SetText((DIFFICULTY_COLOR[e.recipe.diff] or "|cffffffff") .. (e.recipe.name or "?") .. "|r" .. train)
             if e.missing and e.cost == 0 then
                 row.cost:SetText("|cff888888?|r")
@@ -2645,13 +2690,15 @@ end
 local function BuildRoute(prof, target)
     local skill = prof.skill or 1
     local trainer = prof.line and ns.TrainerRecipes[prof.line] or {}
-    -- For recipes you know, the game's colour right now beats the guess:
-    -- line their unlock up so the guess gives that colour at your skill.
+    -- Recipes with the game's own yellow and grey levels use those. For the
+    -- rest, the colour the game shows now places them for the guess.
     local guessBack = { optimal = 0, medium = 10, easy = 25, trivial = 40 }
 
     local pool = {}
     for id, recipe in pairs(prof.recipes) do
-        pool[#pool + 1] = { id = id, recipe = recipe, train = 0, unlock = skill - (guessBack[recipe.diff] or 40) }
+        local exact = ns.SkillUps and ns.SkillUps[id]
+        pool[#pool + 1] = { id = id, recipe = recipe, train = 0,
+            unlock = exact and 0 or (skill - (guessBack[recipe.diff] or 40)) }
     end
     for _, entry in ipairs(trainer) do
         if not entry.rank and not prof.recipes[entry[1]] and entry[2] < target then
@@ -2670,13 +2717,18 @@ local function BuildRoute(prof, target)
         for _, r in ipairs(RANK_AT) do
             if level == r[1] then steps[#steps + 1] = { rank = r[2], at = level } current = nil end
         end
-        local best, bestScore, bestChance
+        -- The cheapest point among recipes with a good chance; a poor chance
+        -- only when nothing better is left at this skill.
+        local best, bestScore, bestChance, bestSure
         for _, p in ipairs(pool) do
             if p.usable and p.unlock <= level then
-                local chance = SKILL_CHANCE[GuessDifficulty(p.unlock, level)]
-                if chance then
-                    local score = (p.cost - p.value) / chance + (trained[p.id] and 0 or p.train / TRAIN_SPREAD)
-                    if not best or score < bestScore then best, bestScore, bestChance = p, score, chance end
+                local chance = SkillUpChance(p.id, p.unlock, level)
+                if chance > 0 then
+                    local score = PointCost(p.cost, p.value, chance) + (trained[p.id] and 0 or p.train / TRAIN_SPREAD)
+                    local sure = chance >= MIN_CHANCE
+                    if not best or (sure and not bestSure) or (sure == bestSure and score < bestScore) then
+                        best, bestScore, bestChance, bestSure = p, score, chance, sure
+                    end
                 end
             end
         end
@@ -3198,8 +3250,10 @@ local function FillRoute(keepStatus)
                 shop.lines[#shop.lines + 1] = string.format("|cffffd100%d: train %s|r", st.at, st.rank)
             else
                 shop.lines[#shop.lines + 1] = string.format("%d-%d: %s%s|r x%d%s", st.from, st.to,
-                    DIFFICULTY_COLOR[GuessDifficulty(st.p.unlock, st.from)] or "", st.p.recipe.name or "?",
-                    math.ceil(st.crafts - 0.001), st.p.train > 0 and " |cff888888(train)|r" or "")
+                    DIFFICULTY_COLOR[select(2, SkillUpChance(st.p.id, st.p.unlock, st.from)) or ""] or "", st.p.recipe.name or "?",
+                    math.ceil(st.crafts - 0.001), (st.p.train > 0 and " |cff888888(train)|r" or "")
+                    -- More than two crafts per point on average: nothing better was left here.
+                    .. (st.crafts > 2 * (st.to - st.from) and " |cffff6060low chance|r" or ""))
             end
         end
     end

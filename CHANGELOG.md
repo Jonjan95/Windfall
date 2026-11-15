@@ -2,6 +2,11 @@
 
 All changes to Windfall, newest first. After an update, type `/reload` in game (or restart the game when the notes say so).
 
+## [0.2.29] - 2026-11-15
+
+- **Accurate skill-up chances.** Windfall now knows when every trainer recipe turns yellow and grey, taken from the game's own recipe data for Forever. A recipe gives a point every time while orange, then less and less until it goes grey, and the plan shows that chance (for example "Light Leather 50%").
+- **The route no longer favours low-chance crafts.** A skill point's cost is what the craft costs after resale, divided by the chance, plus a little effort per craft. Selling a craft never makes levelling count as earning money, which used to make green recipes look good. Recipes with at least a 50% chance come first, and a step that can only be done with low chances says "low chance".
+
 ## [0.2.28] - 2026-11-15
 
 - **Learning a recipe updates the route straight away.** When you learn a recipe or a rank at the trainer, the route and the levelling plan notice it at once, so the Craft button shows while you are still at the trainer. Before, they only knew after you opened the profession window again.

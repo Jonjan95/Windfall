@@ -1,5 +1,7 @@
 # Third-party data
 
+Data/SkillUps.lua holds the yellow and grey skill levels of each recipe, read from the game's own recipe table (SkillLineAbility) for WoW Forever as published on wago.tools.
+
 Data/Recipes.lua is generated from the recipe lists in **What's Training?** by Sveng (https://www.curseforge.com/wow/addons/whats-training), used under its MIT licence:
 
 ```

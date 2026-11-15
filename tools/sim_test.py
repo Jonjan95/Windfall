@@ -152,7 +152,7 @@ Auctionator = { API = { v1 = { GetVendorPriceByItemID=function(_, id) if id == 2
 import os
 _ns = rt.eval('{}')
 _load = rt.eval('function(src, name) return assert(loadstring(src, name)) end')
-for _path in [os.path.join(os.path.dirname(os.path.abspath(sys.argv[2])), 'Data', 'Recipes.lua'), sys.argv[2]]:
+for _path in [os.path.join(os.path.dirname(os.path.abspath(sys.argv[2])), 'Data', n) for n in ('Recipes.lua', 'SkillUps.lua')] + [sys.argv[2]]:
     _load(open(_path, encoding='utf-8').read(), '=' + os.path.basename(_path))('Windfall', _ns)
 print(rt.eval(r'''(function()
   local ev = handlers[#handlers]
