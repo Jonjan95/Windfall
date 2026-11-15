@@ -2,6 +2,11 @@
 
 All changes to Windfall, newest first. After an update, type `/reload` in game (or restart the game when the notes say so).
 
+## [0.2.23] - 2026-11-15
+
+- **Load my professions:** when a character has nothing saved, the Professions window shows a button that opens each of its crafting professions in turn, saves them and closes the window again. No need to open them by hand.
+- **Forget this now needs Shift-click,** so a slip next to the Route button no longer removes a profession.
+
 ## [0.2.22] - 2026-11-15
 
 - **Buy buttons now show when you open a shopping list at the auction house.** Before, they only showed if the list was already open when you walked up to it. The list also docks next to the auction house either way.

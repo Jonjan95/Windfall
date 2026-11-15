@@ -13,7 +13,7 @@ now = 0
 function GetTime() return now end
 function print() end
 zone="Eastern Plaguelands" function GetRealZoneText() return zone end
-StaticPopupDialogs={} function StaticPopup_Show(n) StaticPopupDialogs[n].OnAccept() end
+StaticPopupDialogs={} function StaticPopup_Show(n) if n == 'WINDFALL_FORGET_PROFESSION' then forgetShown = true return end StaticPopupDialogs[n].OnAccept() end
 LOOT_ITEM_SELF = "You receive loot: %s."
 LOOT_ITEM_SELF_MULTIPLE = "You receive loot: %sx%d."
 GOLD_AMOUNT = "%d Gold" SILVER_AMOUNT = "%d Silver" COPPER_AMOUNT = "%d Copper"
@@ -24,7 +24,8 @@ function ClearOverrideBindings() binds = {} end
 function SetOverrideBinding(_,_,key,cmd) binds[key]=cmd end
 function SetOverrideBindingClick(_,_,key,btn) binds[key]="CLICK "..btn end
 C_CVar = { GetCVar=function(n) return cvars[n] end, SetCVar=function(n,v) cvars[n]=v end }
-function IsAltKeyDown() return false end function IsControlKeyDown() return false end function IsShiftKeyDown() return false end
+shiftDown = false
+function IsAltKeyDown() return false end function IsControlKeyDown() return false end function IsShiftKeyDown() return shiftDown end
 local function widget()
   local w = {shown=true}
   return setmetatable(w, {__index=function(t,k)
@@ -113,6 +114,8 @@ RAID_CLASS_COLORS = { PALADIN = { r = 0.96, g = 0.55, b = 0.73 }, MAGE = { r = 0
 Enum = { CraftingReagentType = { Basic = 0 } }
 C_TradeSkillUI = {
   IsTradeSkillLinked = function() return linked end,
+  OpenTradeSkill = function(line) openedLines[#openedLines+1] = line end,
+  CloseTradeSkill = function() closedTrade = true end,
   GetBaseProfessionInfo = function() return trade and { professionName = trade.name, professionID = trade.id, skillLevel = trade.skill, maxSkillLevel = trade.max } end,
   GetAllRecipeIDs = function() local t = {} for id in pairs(trade.recipes) do t[#t+1] = id end return t end,
   GetRecipeInfo = function(id) local r = trade.recipes[id]; if not r then return nil end return { name = r.name, learned = r.learned ~= false and not r.unlearned, relativeDifficulty = r.rd } end,
@@ -456,5 +459,19 @@ print(rt.eval(r'''(function()
   bags[row.item] = (bags[row.item] or 0) + confirmedQty
   ev2(S, "COMMODITY_PURCHASE_SUCCEEDED"); ev2(S, "BAG_UPDATE_DELAYED"); sh("bought")
   ev2(S, "AUCTION_HOUSE_CLOSED"); sh("AH closed")
+  -- forget needs shift, load brings it back
+  local P = WindfallProfessionsFrame
+  if WindfallShoppingFrame then WindfallShoppingFrame:Hide() end
+  P.forget.onOnClick(P.forget)
+  out[#out+1] = "load: plain click on Forget -> popup shown? "..tostring(forgetShown == true).." char="..tostring(P.charButton.text)
+  shiftDown = true; P.forget.onOnClick(P.forget); shiftDown = false
+  out[#out+1] = "load: shift-click on Forget -> popup shown? "..tostring(forgetShown == true)
+  for k in pairs(WindfallDB.chars) do WindfallDB.chars[k] = nil end
+  RefreshForTest = true; P.modeButton.onOnClick(P.modeButton); P.modeButton.onOnClick(P.modeButton)
+  out[#out+1] = "load: everything forgotten -> ["..tostring(P.charButton.text).."] load button shown="..tostring(P.load:IsShown()).." hint="..tostring(P.hint.text)
+  gatherProfs = { 165 }; openedLines = {}
+  P.load.onOnClick(P.load)
+  for _ = 1, 5 do runTimers() end
+  out[#out+1] = "load: opened skill lines "..table.concat(openedLines, ",").." closed="..tostring(closedTrade).." -> ["..tostring(P.charButton.text).."] ["..tostring(P.profButton.text).."] load button shown="..tostring(P.load:IsShown())
   return table.concat(out, "\n")
 end)()''').replace("|cffffd700g|r","g").replace("|cffc7c7cfs|r","s").replace("|cffeda55fc|r","c"))

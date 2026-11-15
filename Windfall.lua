@@ -2060,6 +2060,53 @@ function SaveProfessionSoon()
     end)
 end
 
+-- Opens each of this character's crafting professions in turn, saves it,
+-- and closes the window again: one click instead of opening them by hand.
+local loading = false
+
+local function LoadProfessions()
+    local T = C_TradeSkillUI
+    if loading then return end
+    if not (T and T.OpenTradeSkill) then
+        print("|cff7fd36bWindfall|r: open each profession window once and it is saved.")
+        return
+    end
+    if InCombatLockdown and InCombatLockdown() then
+        print("|cff7fd36bWindfall|r: professions can be loaded once you are out of combat.")
+        return
+    end
+    local queue = {}
+    if GetProfessions and GetProfessionInfo then
+        for _, index in pairs({ GetProfessions() }) do
+            local skillLine = select(7, GetProfessionInfo(index))
+            if PROFESSION_SPELLS[skillLine] then queue[#queue + 1] = skillLine end
+        end
+    end
+    if not queue[1] then
+        print("|cff7fd36bWindfall|r: this character has no crafting profession to load.")
+        return
+    end
+    loading = true
+    local i = 0
+    local function NextProfession()
+        i = i + 1
+        if i > #queue then
+            loading = false
+            if T.CloseTradeSkill then pcall(T.CloseTradeSkill) end
+            print(string.format("|cff7fd36bWindfall|r: loaded %d profession%s.", #queue, #queue == 1 and "" or "s"))
+            if RefreshProfessions then RefreshProfessions() end
+            return
+        end
+        pcall(T.OpenTradeSkill, queue[i])
+        -- Give the recipe list time to arrive, then save it.
+        C_Timer.After(2, function()
+            SaveProfession()
+            NextProfession()
+        end)
+    end
+    NextProfession()
+end
+
 -- What it costs to get one of a reagent: the cheaper of the auction house
 -- and a vendor that sells it (as Auctionator saw at that vendor).
 function ReagentPrice(itemID)
@@ -2407,9 +2454,26 @@ local function BuildProfessionsFrame()
     f.forget:SetSize(110, 20)
     f.forget:SetPoint("BOTTOMRIGHT", -10, 10)
     f.forget:SetText("Forget this")
+    -- Shift-click only, so a slip next to Route does not wipe anything.
     f.forget:SetScript("OnClick", function()
-        if StaticPopup_Show then StaticPopup_Show("WINDFALL_FORGET_PROFESSION") end
+        if IsShiftKeyDown and IsShiftKeyDown() and StaticPopup_Show then
+            StaticPopup_Show("WINDFALL_FORGET_PROFESSION")
+        end
     end)
+    f.forget:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Forget this profession")
+        GameTooltip:AddLine("Shift-click to remove this character's saved profession from Windfall. Opening the profession window again brings it back.", 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    f.forget:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    -- Shown when this character has nothing saved yet.
+    f.load = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    f.load:SetSize(160, 24)
+    f.load:SetPoint("CENTER", 0, 0)
+    f.load:SetText("Load my professions")
+    f.load:SetScript("OnClick", function() LoadProfessions() end)
     return f
 end
 
@@ -2448,12 +2512,14 @@ function RefreshProfessions()
             row.entry = nil
             row.name:SetText("") row.cost:SetText("") row.value:SetText("") row.profit:SetText("")
         end
-        f.hint:SetText("Open a profession window on any character and it is saved here.")
+        f.hint:SetText("Click Load my professions, or open a profession window on any character, and it is saved here.")
+        f.load:Show()
         f.forget:Hide()
         f.route:Hide()
         return
     end
     f.forget:Show()
+    f.load:Hide()
     if profView.target and profView.target <= (prof.skill or 1) then profView.target = nil end
     f.route:SetText("Route to " .. (profView.target or RouteTarget(prof.skill or 1)))
     f.route:SetShown(profView.mode == "plan")
