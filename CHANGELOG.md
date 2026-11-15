@@ -2,6 +2,11 @@
 
 All changes to Windfall, newest first. After an update, type `/reload` in game (or restart the game when the notes say so).
 
+## [0.2.21] - 2026-11-15
+
+- **Levelling route:** in the Professions window's levelling plan, *Route to 150* (right-click for another target) works out every step from your skill to the target - which recipe, roughly how many crafts, where to train the next rank - and adds up all the materials, less what is in your bags. The craft counts are an estimate.
+- **Buy at the auction house:** with a shopping list open, it docks next to the auction house and every material gets a Buy button. Click Buy to find the item, click again to buy the amount you still need at the cheapest prices, then Confirm once the auction house has told you the real total. Nothing is spent before Confirm. Things a vendor sells cheaper get no Buy button.
+
 ## [0.2.20] - 2026-11-15
 
 - **Levelling plan** in the Professions window (the mode button): the cheapest way up from your current skill. It mixes the recipes you know with the ones the trainer can teach you now, ranks them by what a skill point costs (a craft that sells pays for part of itself), and shows the trainer's price. Below that: the next rank to train and what the trainer teaches next. Recipe colours for recipes you have not learned are a guess until you learn them.

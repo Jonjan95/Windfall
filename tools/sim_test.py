@@ -121,6 +121,16 @@ C_TradeSkillUI = {
     return { outputItemID = r.item, quantityMin = 1, quantityMax = 1, reagentSlotSchematics = slots } end,
 }
 C_Item.GetItemNameByID = function(id) return "item"..id end
+ahResults = {} lastSearch = nil startedQty = nil confirmedQty = nil
+C_AuctionHouse = {
+  MakeItemKey = function(id) return { itemID = id } end,
+  SendSearchQuery = function(key) lastSearch = key.itemID end,
+  GetNumCommoditySearchResults = function(id) return #(ahResults[id] or {}) end,
+  GetCommoditySearchResultInfo = function(id, i) return ahResults[id][i] end,
+  StartCommoditiesPurchase = function(id, qty) startedQty = qty end,
+  ConfirmCommoditiesPurchase = function(id, qty) confirmedQty = qty end,
+  CancelCommoditiesPurchase = function() end,
+}
 Auctionator = { API = { v1 = { GetVendorPriceByItemID=function(_, id) if id == 2320 or id == 3371 then return 10 elseif id == 4289 then return 50 end end, GetAuctionPriceByItemID=function(caller,id)
   local p={[2318]=30,[783]=20,[2302]=60,[2304]=45,[2303]=150,[4237]=130,[4231]=40,[4306]=100,[4305]=600,[2996]=50,[2320]=30,[2447]=20,[765]=15,[3371]=40,[118]=500,[13466]=2840,[10620]=4000,[8170]=900,[7909]=30000,[4306]=100} return p[id] end } } }
 ''')
@@ -413,10 +423,36 @@ print(rt.eval(r'''(function()
   for i = 1, 18 do local r = P.rows[i]; if r.entry and r.entry.recipe and r.entry.recipe.reagents[1] and not r.entry.kind then r.onOnClick(r); break end end
   local S = WindfallShoppingFrame
   local function shop(label)
-    out[#out+1] = "shop: "..label.." -> "..S.recipe.text.." / "..S.crafts.text.." / "..S.sum.text
-    for i = 1, 3 do local r = S.rows[i]; if r.name.text ~= "" then out[#out+1] = "      "..r.name.text.." | "..r.need.text.." | "..r.buy.text.." | "..r.total.text end end
+    out[#out+1] = "shop: "..label.." -> "..S.title2.text.." / "..S.crafts.text.." / "..S.sum.text
+    for i = 1, 3 do local r = S.rows[i]; if r:IsShown() then out[#out+1] = "      "..r.name.text.." | "..r.need.text.." | "..r.total.text end end
   end
   shop("opened")
   bags[2318] = 40; S.onOnEvent(S, "BAG_UPDATE_DELAYED"); shop("after buying leather")
+  -- route and auction house buying
+  local P = WindfallProfessionsFrame
+  out[#out+1] = "route: button '"..tostring(P.route.text).."' shown="..tostring(P.route:IsShown())
+  P.route.onOnClick(P.route, "LeftButton")
+  local S = WindfallShoppingFrame
+  local function sh(label)
+    out[#out+1] = "route: "..label.." -> "..tostring(S.title2.text).." | "..tostring(S.sum.text).." | status: "..tostring(S.status.text)
+    for i = 1, 8 do local t = S.lines[i].text; if t and t ~= "" then out[#out+1] = "      step "..t end end
+    for i = 1, 6 do local r = S.rows[i]; if r:IsShown() then out[#out+1] = "      mat "..r.name.text.." | "..r.need.text.." | "..r.total.text.." | buy="..(r.buy:IsShown() and r.buy.text or "-") end end
+  end
+  sh("route opened, not at the AH")
+  P.route.onOnClick(P.route, "RightButton"); out[#out+1] = "route: right-click target -> "..P.route.text
+  -- at the auction house
+  ev2 = S.onOnEvent
+  ev2(S, "AUCTION_HOUSE_SHOW")
+  local row; for i = 1, 6 do if S.rows[i]:IsShown() and S.rows[i].buy:IsShown() then row = S.rows[i] break end end
+  sh("AH open")
+  row.buy.onOnClick(row.buy); out[#out+1] = "ah: searched itemKey="..tostring(lastSearch).." button="..row.buy.text
+  ahResults[row.item] = { { unitPrice = 25, quantity = 10 }, { unitPrice = 40, quantity = 100 } }
+  ev2(S, "COMMODITY_SEARCH_RESULTS_UPDATED", row.item); sh("results arrived")
+  row.buy.onOnClick(row.buy); out[#out+1] = "ah: started purchase "..tostring(startedQty).." button="..row.buy.text
+  ev2(S, "COMMODITY_PRICE_UPDATED", 39, 39 * startedQty); sh("price came back")
+  row.buy.onOnClick(row.buy); out[#out+1] = "ah: confirmed "..tostring(confirmedQty)
+  bags[row.item] = (bags[row.item] or 0) + confirmedQty
+  ev2(S, "COMMODITY_PURCHASE_SUCCEEDED"); ev2(S, "BAG_UPDATE_DELAYED"); sh("bought")
+  ev2(S, "AUCTION_HOUSE_CLOSED"); sh("AH closed")
   return table.concat(out, "\n")
 end)()''').replace("|cffffd700g|r","g").replace("|cffc7c7cfs|r","s").replace("|cffeda55fc|r","c"))

@@ -8,7 +8,7 @@
 local ADDON = "Windfall"
 local ns = select(2, ...) or {}
 ns.TrainerRecipes = ns.TrainerRecipes or {}
-local ReadRecipe, SkillLineOf, ShowShoppingList, SaveProfessionSoon
+local ReadRecipe, SkillLineOf, ShowShoppingList, ShowRoute, SaveProfessionSoon
 local ApplySparkles, StartSparkles, StopSparkles, SkillsChanged, GetawayText, SparkleRecheck
 local MAX_ROWS = 14
 local WIDTH = 290
@@ -1929,6 +1929,8 @@ function ToggleSettings()
 end
 
 -- ---------------------------------------------------------- professions ----
+local DIFFICULTY_COLOR, ReagentPrice, CraftNumbers, SKILL_CHANCE, TRAIN_SPREAD, GuessDifficulty, TrainerRecipe
+local RouteTarget, ROUTE_TARGETS
 -- In a block of its own: the game allows a file at most 200 locals at the top.
 do
 
@@ -1940,7 +1942,7 @@ local AH_CUT = 0.05
 local PROF_ROWS = 18
 local PROF_WIDTH = 520
 local DIFFICULTY_BY_NUMBER = { [0] = "optimal", [1] = "medium", [2] = "easy", [3] = "trivial" }
-local DIFFICULTY_COLOR = {
+DIFFICULTY_COLOR = {
     optimal = "|cffff8040", medium = "|cffffff00", easy = "|cff40c040", trivial = "|cff808080",
 }
 local DIFFICULTY_LABEL = {
@@ -2060,7 +2062,7 @@ end
 
 -- What it costs to get one of a reagent: the cheaper of the auction house
 -- and a vendor that sells it (as Auctionator saw at that vendor).
-local function ReagentPrice(itemID)
+function ReagentPrice(itemID)
     local ah = AuctionPrice(itemID)
     local vendor
     local api = Auctionator and Auctionator.API and Auctionator.API.v1
@@ -2074,7 +2076,7 @@ end
 
 -- Cost, value and profit of one craft. Value is what the result sells for
 -- after the auction house cut, or what a vendor pays if that is more.
-local function CraftNumbers(recipe)
+function CraftNumbers(recipe)
     local cost, missing = 0, false
     for _, r in ipairs(recipe.reagents) do
         local price = ReagentPrice(r[1])
@@ -2147,19 +2149,19 @@ end
 -- how far past their unlock skill you are, since the game only says once you
 -- know them. A craft that sells covers part of its own cost; orange gives a
 -- point every time, yellow and green less often.
-local SKILL_CHANCE = { optimal = 1, medium = 0.75, easy = 0.25 }
+SKILL_CHANCE = { optimal = 1, medium = 0.75, easy = 0.25 }
 local RANK_CAP = { Journeyman = 150, Expert = 225, Artisan = 300 }
-local TRAIN_SPREAD = 5      -- skill points a trained recipe's price is spread over
+TRAIN_SPREAD = 5      -- skill points a trained recipe's price is spread over
 local PLAN_CHOICES = 8      -- recipes listed under "best way up"
 local PLAN_UNLOCKS = 6      -- recipes listed under "coming up"
 
-local function GuessDifficulty(unlockAt, skill)
+function GuessDifficulty(unlockAt, skill)
     local gap = skill - unlockAt
     if gap < 10 then return "optimal" elseif gap < 25 then return "medium" elseif gap < 40 then return "easy" end
     return "trivial"
 end
 
-local function TrainerRecipe(entry)
+function TrainerRecipe(entry)
     local data = db.recipeData and db.recipeData[entry[1]]
     return {
         name = (data and data.name) or (C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(entry[1]))
@@ -2280,110 +2282,6 @@ local function RecipeTooltip(row)
     GameTooltip:Show()
 end
 
--- Shopping list: what to buy for a number of crafts of one recipe, less what
--- is already in your bags, priced like the rest of Windfall.
-local shopFrame, shopRecipe, shopCrafts = nil, nil, 5
-local SHOP_ROWS = 8
-local SHOP_WIDTH = 400
-
-local function BagCountOf(itemID)
-    local count = (C_Item and C_Item.GetItemCount) or GetItemCount
-    return count and count(itemID) or 0
-end
-
-local function RefreshShoppingList()
-    if not (shopFrame and shopFrame:IsShown() and shopRecipe) then return end
-    local f = shopFrame
-    f.recipe:SetText((DIFFICULTY_COLOR[shopRecipe.diff] or "|cffffffff") .. (shopRecipe.name or "?") .. "|r")
-    f.crafts:SetText(shopCrafts .. " crafts")
-    local total, missing = 0, false
-    for i, row in ipairs(f.rows) do
-        local r = shopRecipe.reagents[i]
-        if r then
-            local need = r[2] * shopCrafts
-            local have = BagCountOf(r[1])
-            local buy = math.max(0, need - have)
-            local price, fromVendor = ReagentPrice(r[1])
-            local name = (C_Item and C_Item.GetItemNameByID and C_Item.GetItemNameByID(r[1])) or ("item " .. r[1])
-            row.name:SetText(string.format("|T%s:14|t %s", tostring(ItemIcon(r[1])), name))
-            row.need:SetText(string.format("%d |cff888888(%d in bags)|r", need, have))
-            row.buy:SetText(buy > 0 and ("buy " .. buy) or "|cff7fd36bhave|r")
-            if buy == 0 then
-                row.total:SetText("")
-            elseif price then
-                total = total + price * buy
-                row.total:SetText(Money(price * buy) .. (fromVendor and " |cff888888vendor|r" or ""))
-            else
-                missing = true
-                row.total:SetText("|cffff6060no price|r")
-            end
-        else
-            row.name:SetText("") row.need:SetText("") row.buy:SetText("") row.total:SetText("")
-        end
-    end
-    f.sum:SetText("Total to buy: " .. Money(total) .. (missing and " |cffff6060+ unpriced|r" or ""))
-end
-
-function ShowShoppingList(recipe)
-    if not shopFrame then
-        local f = MakeWindow("WindfallShoppingFrame", "shopping list", SHOP_WIDTH)
-        f:SetHeight(92 + SHOP_ROWS * ROW_H + 30)
-        f:SetPoint("CENTER", UIParent, "CENTER", 300, 60)
-        f.recipe = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-        f.recipe:SetPoint("TOPLEFT", 12, -34)
-        f.recipe:SetWidth(SHOP_WIDTH - 150)
-        f.recipe:SetJustifyH("LEFT")
-        f.recipe:SetWordWrap(false)
-
-        local function Step(label, delta, anchor, x)
-            local b = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-            b:SetSize(28, 20)
-            b:SetPoint("TOPRIGHT", anchor, x, -30)
-            b:SetText(label)
-            b:SetScript("OnClick", function()
-                local step = IsShiftKeyDown and IsShiftKeyDown() and 10 or 1
-                shopCrafts = math.max(1, shopCrafts + delta * step)
-                RefreshShoppingList()
-            end)
-            return b
-        end
-        Step("+", 1, -12)
-        f.crafts = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        f.crafts:SetPoint("TOPRIGHT", -46, -35)
-        Step("-", -1, -108)
-
-        f.rows = {}
-        for i = 1, SHOP_ROWS do
-            local y = -60 - (i - 1) * ROW_H
-            local row = {}
-            row.name = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            row.name:SetPoint("TOPLEFT", 12, y)
-            row.name:SetWidth(150)
-            row.name:SetJustifyH("LEFT")
-            row.name:SetWordWrap(false)
-            row.need = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            row.need:SetPoint("TOPLEFT", 166, y)
-            row.buy = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            row.buy:SetPoint("TOPRIGHT", -120, y)
-            row.total = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            row.total:SetPoint("TOPRIGHT", -12, y)
-            f.rows[i] = row
-        end
-        f.sum = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        f.sum:SetPoint("BOTTOMLEFT", 12, 30)
-        f.note = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-        f.note:SetPoint("BOTTOMLEFT", 12, 12)
-        f.note:SetText("Shift-click + or - to change by 10. Updates as your bags fill.")
-        -- Bags change while you shop.
-        f:SetScript("OnEvent", RefreshShoppingList)
-        f:RegisterEvent("BAG_UPDATE_DELAYED")
-        shopFrame = f
-    end
-    shopRecipe = recipe
-    shopFrame:Show()
-    RefreshShoppingList()
-end
-
 local function BuildProfessionsFrame()
     local f = MakeWindow("WindfallProfessionsFrame", "professions", PROF_WIDTH)
     f:SetHeight(84 + PROF_ROWS * ROW_H + 40)
@@ -2473,7 +2371,36 @@ local function BuildProfessionsFrame()
 
     f.hint = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     f.hint:SetPoint("BOTTOMLEFT", 12, 14)
-    f.hint:SetWidth(PROF_WIDTH - 130)
+    f.hint:SetWidth(PROF_WIDTH - 250)
+
+    f.route = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    f.route:SetSize(110, 20)
+    f.route:SetPoint("BOTTOMRIGHT", -126, 10)
+    f.route:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    f.route:SetScript("OnClick", function(_, button)
+        local _, prof = CurrentProfession()
+        if not prof then return end
+        local target = profView.target or RouteTarget(prof.skill or 1)
+        if button == "RightButton" then
+            -- Next target above your skill, round again after 300.
+            local nextTarget
+            for _, t in ipairs(ROUTE_TARGETS) do
+                if t > target and t > (prof.skill or 1) then nextTarget = t break end
+            end
+            profView.target = nextTarget or RouteTarget(prof.skill or 1)
+            RefreshProfessions()
+        else
+            ShowRoute(prof, profView.prof, target)
+        end
+    end)
+    f.route:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Levelling route")
+        GameTooltip:AddLine("Every step and all the materials from your skill up to the target, with Buy buttons at the auction house.", 1, 1, 1, true)
+        GameTooltip:AddLine("Right-click: change the target", 0.6, 0.6, 0.6)
+        GameTooltip:Show()
+    end)
+    f.route:SetScript("OnLeave", function() GameTooltip:Hide() end)
     f.hint:SetJustifyH("LEFT")
 
     f.forget = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
@@ -2523,9 +2450,13 @@ function RefreshProfessions()
         end
         f.hint:SetText("Open a profession window on any character and it is saved here.")
         f.forget:Hide()
+        f.route:Hide()
         return
     end
     f.forget:Show()
+    if profView.target and profView.target <= (prof.skill or 1) then profView.target = nil end
+    f.route:SetText("Route to " .. (profView.target or RouteTarget(prof.skill or 1)))
+    f.route:SetShown(profView.mode == "plan")
     f.charButton:SetText(ClassColored(char, profView.char))
     f.profButton:SetText(profView.prof)
     f.skill:SetText(string.format("Skill %d / %d", prof.skill or 0, prof.max or 0))
@@ -2595,6 +2526,449 @@ function ToggleProfessions()
         profView.offset = 0
     end
     RefreshProfessions()
+end
+end
+
+-- Route and shopping list, in a block of their own (the 200-locals limit).
+do
+-- Levelling route: the plan played forward from your skill to a target, one
+-- skill point at a time, always taking the cheapest recipe per point. Recipe
+-- colours along the way are guessed from each recipe's unlock skill, so the
+-- craft counts are an estimate; the plan itself recalculates as you level.
+local RANK_AT = { { 50, "Journeyman" }, { 125, "Expert" }, { 200, "Artisan" } }
+ROUTE_TARGETS = { 75, 150, 225, 300 }
+
+function RouteTarget(skill)
+    for _, t in ipairs(ROUTE_TARGETS) do
+        if t > skill then return t end
+    end
+    return 300
+end
+
+local function BuildRoute(prof, target)
+    local skill = prof.skill or 1
+    local trainer = prof.line and ns.TrainerRecipes[prof.line] or {}
+    -- For recipes you know, the game's colour right now beats the guess:
+    -- line their unlock up so the guess gives that colour at your skill.
+    local guessBack = { optimal = 0, medium = 10, easy = 25, trivial = 40 }
+
+    local pool = {}
+    for id, recipe in pairs(prof.recipes) do
+        pool[#pool + 1] = { id = id, recipe = recipe, train = 0, unlock = skill - (guessBack[recipe.diff] or 40) }
+    end
+    for _, entry in ipairs(trainer) do
+        if not entry.rank and not prof.recipes[entry[1]] and entry[2] < target then
+            pool[#pool + 1] = { id = entry[1], recipe = TrainerRecipe(entry), train = entry[3], unlock = entry[2] }
+        end
+    end
+    for _, p in ipairs(pool) do
+        local cost, value, _, missing = CraftNumbers(p.recipe)
+        p.cost, p.value = cost, value or 0
+        p.usable = not missing and not p.recipe.noReagents and p.recipe.reagents[1] ~= nil
+    end
+
+    local steps, crafts, trained, gaps = {}, {}, {}, {}
+    local current
+    for level = skill, target - 1 do
+        for _, r in ipairs(RANK_AT) do
+            if level == r[1] then steps[#steps + 1] = { rank = r[2], at = level } current = nil end
+        end
+        local best, bestScore, bestChance
+        for _, p in ipairs(pool) do
+            if p.usable and p.unlock <= level then
+                local chance = SKILL_CHANCE[GuessDifficulty(p.unlock, level)]
+                if chance then
+                    local score = (p.cost - p.value) / chance + (trained[p.id] and 0 or p.train / TRAIN_SPREAD)
+                    if not best or score < bestScore then best, bestScore, bestChance = p, score, chance end
+                end
+            end
+        end
+        if not best then
+            gaps[#gaps + 1] = level
+            current = nil
+        else
+            trained[best.id] = true
+            crafts[best.id] = (crafts[best.id] or 0) + 1 / bestChance
+            if current and current.p == best then
+                current.to = level + 1
+                current.crafts = current.crafts + 1 / bestChance
+            else
+                current = { p = best, from = level, to = level + 1, crafts = 1 / bestChance }
+                steps[#steps + 1] = current
+            end
+        end
+    end
+
+    -- Materials for every craft, rounded up per recipe.
+    local need, order, trainCost = {}, {}, 0
+    for _, p in ipairs(pool) do
+        local n = crafts[p.id]
+        if n then
+            n = math.ceil(n - 0.001)
+            if p.train > 0 then trainCost = trainCost + p.train end
+            for _, r in ipairs(p.recipe.reagents) do
+                if not need[r[1]] then order[#order + 1] = r[1] end
+                need[r[1]] = (need[r[1]] or 0) + r[2] * n
+            end
+        end
+    end
+    local items = {}
+    for _, id in ipairs(order) do items[#items + 1] = { id = id, need = need[id] } end
+    return steps, items, trainCost, gaps
+end
+
+-- Shopping list window: what to buy, less what is in your bags. Next to the
+-- auction house it gets a Buy button per item.
+local shopFrame
+local shop = { title = "", lines = {}, items = {}, crafts = 5 }
+local SHOP_STEP_ROWS = 8
+local SHOP_ROWS = 10
+local SHOP_WIDTH = 440
+local ahOpen = false
+local buying                    -- the item being bought: { id, qty, step, ... }
+local RefreshShoppingList
+
+local function BagCountOf(itemID)
+    local count = (C_Item and C_Item.GetItemCount) or GetItemCount
+    return count and count(itemID) or 0
+end
+
+local function ItemName(itemID)
+    return (C_Item and C_Item.GetItemNameByID and C_Item.GetItemNameByID(itemID)) or ("item " .. itemID)
+end
+
+-- ------------------------------------------------------------ buying ------
+
+local AH = C_AuctionHouse
+
+local function Status(text)
+    if shopFrame then shopFrame.status:SetText(text or "") end
+end
+
+local function StopBuying(text)
+    if buying and buying.step == "pricing" or buying and buying.step == "confirm" then
+        pcall(AH.CancelCommoditiesPurchase)
+    end
+    buying = nil
+    Status(text)
+    if RefreshShoppingList then RefreshShoppingList() end
+end
+
+local function StartSearch(itemID, qty)
+    if not (AH and AH.SendSearchQuery and AH.MakeItemKey) then
+        Status("|cffff6060This auction house cannot be searched by Windfall.|r")
+        return
+    end
+    StopBuying()
+    buying = { id = itemID, qty = qty, step = "searching", at = GetTime() }
+    AH.SendSearchQuery(AH.MakeItemKey(itemID), { { sortOrder = 0, reverseSort = false } }, false)
+    Status("Searching for " .. ItemName(itemID) .. "...")
+    C_Timer.After(5, function()
+        if buying and buying.id == itemID and buying.step == "searching" then
+            StopBuying("|cffff6060No answer from the auction house. Click Buy again.|r")
+        end
+    end)
+    RefreshShoppingList()
+end
+
+-- What qty would cost at the cheapest commodity prices now listed.
+local function CommodityQuote(itemID, qty)
+    local total, got = 0, 0
+    for i = 1, AH.GetNumCommoditySearchResults(itemID) or 0 do
+        local r = AH.GetCommoditySearchResultInfo(itemID, i)
+        if r then
+            local take = math.min(qty - got, r.quantity)
+            total, got = total + take * r.unitPrice, got + take
+            if got >= qty then break end
+        end
+    end
+    return got, total
+end
+
+local function OnCommodityResults(itemID)
+    if not (buying and buying.id == itemID and buying.step == "searching") then return end
+    local got, total = CommodityQuote(itemID, buying.qty)
+    if got == 0 then
+        StopBuying("|cffff6060" .. ItemName(itemID) .. ": none for sale.|r")
+        return
+    end
+    buying.commodity, buying.step, buying.buyQty, buying.quote = true, "ready", got, total
+    Status(string.format("%s: %d for %s%s. Click Buy %d to buy them.", ItemName(itemID), got, Money(total),
+        got < buying.qty and string.format(" |cffff6060(only %d listed)|r", got) or "", got))
+    RefreshShoppingList()
+end
+
+local function OnItemResults(itemKey)
+    if not (buying and itemKey and itemKey.itemID == buying.id and buying.step == "searching") then return end
+    -- Not a commodity: auctions one by one. Take the cheapest per item.
+    local best
+    for i = 1, AH.GetNumItemSearchResults(itemKey) or 0 do
+        local r = AH.GetItemSearchResultInfo(itemKey, i)
+        if r and r.buyoutAmount and (not best or r.buyoutAmount / r.quantity < best.buyoutAmount / best.quantity) then
+            best = r
+        end
+    end
+    if not best then
+        StopBuying("|cffff6060" .. ItemName(buying.id) .. ": none with a buyout.|r")
+        return
+    end
+    buying.commodity, buying.step, buying.auction = false, "ready", best
+    buying.buyQty, buying.quote = best.quantity, best.buyoutAmount
+    Status(string.format("%s: cheapest auction is %d for %s. Click Buy %d to buy it.", ItemName(buying.id),
+        best.quantity, Money(best.buyoutAmount), best.quantity))
+    RefreshShoppingList()
+end
+
+-- The Buy button: each click moves the purchase one step, and nothing is
+-- spent until the last click, after the auction house has said the real price.
+local function BuyClicked(itemID, qty)
+    if not ahOpen then return end
+    if not buying or buying.id ~= itemID then
+        StartSearch(itemID, qty)
+    elseif buying.step == "ready" and buying.commodity then
+        buying.step = "pricing"
+        AH.StartCommoditiesPurchase(itemID, buying.buyQty)
+        Status("Asking the auction house for the price...")
+    elseif buying.step == "ready" then
+        local a = buying.auction
+        buying.step = "buying"
+        AH.PlaceBid(a.auctionID, a.buyoutAmount)
+        Status("Buying...")
+        C_Timer.After(2, function()
+            if buying and buying.id == itemID and buying.step == "buying" then
+                StopBuying("Bought " .. ItemName(itemID) .. ". Click Buy for more.")
+            end
+        end)
+    elseif buying.step == "confirm" then
+        buying.step = "buying"
+        AH.ConfirmCommoditiesPurchase(itemID, buying.buyQty)
+        Status("Buying...")
+    end
+    RefreshShoppingList()
+end
+
+local function OnPriceUpdated(unitPrice, totalPrice)
+    if not (buying and buying.step == "pricing") then return end
+    buying.step, buying.total = "confirm", totalPrice
+    local warn = totalPrice > (buying.quote or 0) * 1.05 and " |cffff6060(went up)|r" or ""
+    Status(string.format("%d %s for %s (%s each)%s. Click Confirm to buy.", buying.buyQty, ItemName(buying.id),
+        Money(totalPrice), Money(unitPrice), warn))
+    RefreshShoppingList()
+end
+
+local function OnAuctionEvent(event, ...)
+    if event == "AUCTION_HOUSE_SHOW" then
+        ahOpen = true
+        -- Next to the auction house, but only with something left to buy.
+        local anything
+        for _, item in ipairs(shop.items) do
+            if item.need * (shop.crafts and shop.single and shop.crafts or 1) > BagCountOf(item.id) then anything = true end
+        end
+        if anything and shopFrame then
+            local ahFrame = _G.AuctionHouseFrame
+            if ahFrame then
+                shopFrame:ClearAllPoints()
+                shopFrame:SetPoint("TOPLEFT", ahFrame, "TOPRIGHT", 8, 0)
+            end
+            shopFrame:Show()
+        end
+    elseif event == "AUCTION_HOUSE_CLOSED" then
+        ahOpen = false
+        StopBuying()
+    elseif event == "COMMODITY_SEARCH_RESULTS_UPDATED" then
+        OnCommodityResults(...)
+    elseif event == "ITEM_SEARCH_RESULTS_UPDATED" then
+        OnItemResults(...)
+    elseif event == "COMMODITY_PRICE_UPDATED" then
+        OnPriceUpdated(...)
+    elseif event == "COMMODITY_PRICE_UNAVAILABLE" then
+        StopBuying("|cffff6060The price is no longer available. Click Buy to search again.|r")
+    elseif event == "COMMODITY_PURCHASE_SUCCEEDED" then
+        local name = buying and ItemName(buying.id) or "it"
+        buying = nil
+        Status("|cff7fd36bBought " .. name .. ".|r")
+    elseif event == "COMMODITY_PURCHASE_FAILED" then
+        StopBuying("|cffff6060The purchase failed. Click Buy to try again.|r")
+    end
+    if RefreshShoppingList then RefreshShoppingList() end
+end
+
+-- ------------------------------------------------------------ window ------
+
+function RefreshShoppingList()
+    if not (shopFrame and shopFrame:IsShown()) then return end
+    local f = shopFrame
+    f.title2:SetText(shop.title)
+    f.crafts:SetShown(shop.single)
+    f.minus:SetShown(shop.single)
+    f.plus:SetShown(shop.single)
+    if shop.single then f.crafts:SetText(shop.crafts .. " crafts") end
+
+    for i, row in ipairs(f.lines) do row:SetText(shop.lines[i] or "") end
+    local top = -58 - #shop.lines * 14
+    f.matHead:ClearAllPoints()
+    f.matHead:SetPoint("TOPLEFT", 12, top - 4)
+
+    local total, missing = 0, false
+    for i, row in ipairs(f.rows) do
+        local item = shop.items[i]
+        local y = top - 22 - (i - 1) * 20
+        row:ClearAllPoints()
+        row:SetPoint("TOPLEFT", 8, y)
+        if item then
+            local need = item.need * (shop.single and shop.crafts or 1)
+            local have = BagCountOf(item.id)
+            local buy = math.max(0, need - have)
+            local price, fromVendor = ReagentPrice(item.id)
+            row.name:SetText(string.format("|T%s:14|t %s", tostring(ItemIcon(item.id)), ItemName(item.id)))
+            row.need:SetText(string.format("%d |cff888888(%d in bags)|r", need, have))
+            if buy == 0 then
+                row.total:SetText("|cff7fd36bhave all|r")
+            elseif price then
+                total = total + price * buy
+                row.total:SetText(buy .. " for " .. Money(price * buy) .. (fromVendor and " |cff888888vendor|r" or ""))
+            else
+                missing = true
+                row.total:SetText(buy .. " |cffff6060no price|r")
+            end
+            -- Buy button, only at the auction house and only for what is left.
+            local mine = buying and buying.id == item.id
+            row.buy:SetShown(ahOpen and buy > 0 and not (fromVendor and price))
+            if mine and buying.step == "ready" then
+                row.buy:SetText("Buy " .. buying.buyQty)
+            elseif mine and buying.step == "confirm" then
+                row.buy:SetText("|cff7fd36bConfirm|r")
+            elseif mine then
+                row.buy:SetText("...")
+            else
+                row.buy:SetText("Buy")
+            end
+            row.item, row.toBuy = item.id, buy
+            row:Show()
+        else
+            row:Hide()
+        end
+    end
+    f.sum:SetText("Left to buy: " .. Money(total) .. (missing and " |cffff6060+ unpriced|r" or ""))
+    f:SetHeight(-top + 22 + #shop.items * 20 + 70)
+end
+
+local function BuildShoppingFrame()
+    local f = MakeWindow("WindfallShoppingFrame", "shopping list", SHOP_WIDTH)
+    f:SetPoint("CENTER", UIParent, "CENTER", 300, 60)
+    f.title2 = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    f.title2:SetPoint("TOPLEFT", 12, -34)
+    f.title2:SetWidth(SHOP_WIDTH - 150)
+    f.title2:SetJustifyH("LEFT")
+    f.title2:SetWordWrap(false)
+
+    local function Step(label, delta, x)
+        local b = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+        b:SetSize(28, 20)
+        b:SetPoint("TOPRIGHT", x, -30)
+        b:SetText(label)
+        b:SetScript("OnClick", function()
+            local step = IsShiftKeyDown and IsShiftKeyDown() and 10 or 1
+            shop.crafts = math.max(1, shop.crafts + delta * step)
+            RefreshShoppingList()
+        end)
+        return b
+    end
+    f.plus = Step("+", 1, -12)
+    f.crafts = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    f.crafts:SetPoint("TOPRIGHT", -46, -35)
+    f.minus = Step("-", -1, -108)
+
+    f.lines = {}
+    for i = 1, SHOP_STEP_ROWS do
+        local line = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        line:SetPoint("TOPLEFT", 14, -56 - (i - 1) * 14)
+        line:SetWidth(SHOP_WIDTH - 28)
+        line:SetJustifyH("LEFT")
+        line:SetWordWrap(false)
+        f.lines[i] = line
+    end
+    f.matHead = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    f.matHead:SetText("Materials")
+
+    f.rows = {}
+    for i = 1, SHOP_ROWS do
+        local row = CreateFrame("Frame", nil, f)
+        row:SetSize(SHOP_WIDTH - 16, 20)
+        row.name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row.name:SetPoint("LEFT", 4, 0)
+        row.name:SetWidth(150)
+        row.name:SetJustifyH("LEFT")
+        row.name:SetWordWrap(false)
+        row.need = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row.need:SetPoint("LEFT", 158, 0)
+        row.total = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row.total:SetPoint("RIGHT", -74, 0)
+        row.buy = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+        row.buy:SetSize(66, 18)
+        row.buy:SetPoint("RIGHT", -2, 0)
+        row.buy:SetScript("OnClick", function() BuyClicked(row.item, row.toBuy) end)
+        f.rows[i] = row
+    end
+
+    f.sum = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    f.sum:SetPoint("BOTTOMLEFT", 12, 34)
+    f.status = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    f.status:SetPoint("BOTTOMLEFT", 12, 12)
+    f.status:SetWidth(SHOP_WIDTH - 24)
+    f.status:SetJustifyH("LEFT")
+
+    f:SetScript("OnEvent", function(_, event, ...)
+        if event == "BAG_UPDATE_DELAYED" then RefreshShoppingList() else OnAuctionEvent(event, ...) end
+    end)
+    for _, event in ipairs({ "BAG_UPDATE_DELAYED", "AUCTION_HOUSE_SHOW", "AUCTION_HOUSE_CLOSED",
+        "COMMODITY_SEARCH_RESULTS_UPDATED", "ITEM_SEARCH_RESULTS_UPDATED", "COMMODITY_PRICE_UPDATED",
+        "COMMODITY_PRICE_UNAVAILABLE", "COMMODITY_PURCHASE_SUCCEEDED", "COMMODITY_PURCHASE_FAILED" }) do
+        pcall(f.RegisterEvent, f, event)
+    end
+    f:SetScript("OnHide", function() StopBuying() end)
+    return f
+end
+
+local function OpenShopping()
+    shopFrame = shopFrame or BuildShoppingFrame()
+    StopBuying()
+    shopFrame:Show()
+    RefreshShoppingList()
+end
+
+-- One recipe, a number of crafts.
+function ShowShoppingList(recipe)
+    shop.single, shop.lines = true, {}
+    shop.title = (DIFFICULTY_COLOR[recipe.diff] or "|cffffffff") .. (recipe.name or "?") .. "|r"
+    shop.items = {}
+    for _, r in ipairs(recipe.reagents) do shop.items[#shop.items + 1] = { id = r[1], need = r[2] } end
+    OpenShopping()
+end
+
+-- A whole route, up to target.
+function ShowRoute(prof, profName, target)
+    local steps, items, trainCost, gaps = BuildRoute(prof, target)
+    shop.single = false
+    shop.title = string.format("%s %d to %d", profName, prof.skill or 1, target)
+    shop.lines = {}
+    for _, s in ipairs(steps) do
+        if #shop.lines >= SHOP_STEP_ROWS - 1 then break end
+        if s.rank then
+            shop.lines[#shop.lines + 1] = string.format("|cffffd100%d: train %s|r", s.at, s.rank)
+        else
+            shop.lines[#shop.lines + 1] = string.format("%d-%d: %s%s|r x%d%s", s.from, s.to,
+                DIFFICULTY_COLOR[GuessDifficulty(s.p.unlock, s.from)] or "", s.p.recipe.name or "?",
+                math.ceil(s.crafts - 0.001), s.p.train > 0 and " |cff888888(train)|r" or "")
+        end
+    end
+    if #steps > #shop.lines then shop.lines[#shop.lines + 1] = "|cff888888... and more steps|r" end
+    if gaps[1] then
+        shop.lines[#shop.lines] = string.format("|cffff6060No priced recipe from %d. Scan the auction house.|r", gaps[1])
+    end
+    shop.items = items
+    OpenShopping()
+    if trainCost > 0 then Status("Trainer recipes on this route: " .. Money(trainCost) .. ". Counts are an estimate.") end
 end
 end
 
