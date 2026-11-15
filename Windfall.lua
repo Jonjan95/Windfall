@@ -2474,6 +2474,8 @@ local function BuildProfessionsFrame()
     f.load:SetPoint("CENTER", 0, 0)
     f.load:SetText("Load my professions")
     f.load:SetScript("OnClick", function() LoadProfessions() end)
+    -- Above the recipe rows, which cover the middle of the window.
+    f.load:SetFrameLevel(f:GetFrameLevel() + 10)
     return f
 end
 
@@ -2510,6 +2512,7 @@ function RefreshProfessions()
         f.skill:SetText("")
         for _, row in ipairs(f.rows) do
             row.entry = nil
+            row:EnableMouse(false)
             row.name:SetText("") row.cost:SetText("") row.value:SetText("") row.profit:SetText("")
         end
         f.hint:SetText("Click Load my professions, or open a profession window on any character, and it is saved here.")
@@ -2532,6 +2535,8 @@ function RefreshProfessions()
     for i, row in ipairs(f.rows) do
         local e = profList[i + profView.offset]
         row.entry = e
+        -- Only rows with a recipe take the mouse.
+        row:EnableMouse(e ~= nil and e.recipe ~= nil)
         row.name:SetText("") row.cost:SetText("") row.value:SetText("") row.profit:SetText("")
         if not e then
             -- empty row

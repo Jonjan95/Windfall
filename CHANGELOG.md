@@ -2,6 +2,10 @@
 
 All changes to Windfall, newest first. After an update, type `/reload` in game (or restart the game when the notes say so).
 
+## [0.2.24] - 2026-11-15
+
+- **Load my professions can be clicked now.** The empty recipe rows lay on top of it.
+
 ## [0.2.23] - 2026-11-15
 
 - **Load my professions:** when a character has nothing saved, the Professions window shows a button that opens each of its crafting professions in turn, saves them and closes the window again. No need to open them by hand.
