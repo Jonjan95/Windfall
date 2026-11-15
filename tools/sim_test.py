@@ -43,6 +43,8 @@ local function widget()
     if k=="SetChecked" then return function(s,v) s.checked=v end end
     if k=="GetChecked" then return function(s) return s.checked end end
     if k=="GetStringHeight" then return function() return 300 end end
+    if k=="AddLine" then return function(s,t) tipLines[#tipLines+1]=tostring(t) end end
+    if k=="AddDoubleLine" then return function(s,a,b) tipLines[#tipLines+1]=tostring(a).." = "..tostring(b) end end
     if k=="SetHeight" then return function(s,x) s.h=x end end
     return function() end
   end})
@@ -62,7 +64,7 @@ end
 C_Timer = { NewTicker=function(_,fn) tick=fn end }
 C_Spell = { GetSpellName=function(id) local n={[2366]="Herb Gathering",[2575]="Mining",[8613]="Skinning",[7620]="Fishing",[133]="Fireball"} return n[id] end }
 local sub = {[13466]=9,[10620]=7,[8170]=6}
-local vend = {[2589]=13,[4306]=150,[7909]=2500}
+local vend = {[6238]=80,[2589]=13,[4306]=150,[7909]=2500}
 C_Item = {
   GetItemInfoInstant=function(id) if sub[id] then return id,"","","",134215,7,sub[id] end return id,"","","",1,4,1 end,
   GetItemInfo=function(id) return "n",nil,1,1,1,"","",1,"",1,vend[id] end,
@@ -98,8 +100,26 @@ do local oldUnitName = UnitName
 C_NamePlate = { GetNamePlateForUnit=function(u) if u == "softinteract" and soft and not plateMissing then return UIParent end end }
 do local oldNT = C_Timer.NewTicker
   C_Timer.NewTicker = function(d, fn) if d == 0.2 then sparkleTick = fn; return { Cancel=function() sparkleTick = function() end end } end return oldNT(d, fn) end end
-Auctionator = { API = { v1 = { GetAuctionPriceByItemID=function(caller,id)
-  local p={[13466]=2840,[10620]=4000,[8170]=900,[7909]=30000,[4306]=100} return p[id] end } } }
+player = "Jonis" class = "PALADIN" trade = nil linked = false tipLines = {}
+do local oldUN = UnitName
+  function UnitName(u) if u == "player" then return player end return oldUN(u) end end
+function GetRealmName() return "Realm" end
+function time() return 1763200000 end
+function UnitClass() return class, class end
+RAID_CLASS_COLORS = { PALADIN = { r = 0.96, g = 0.55, b = 0.73 }, MAGE = { r = 0.25, g = 0.78, b = 0.92 } }
+Enum = { CraftingReagentType = { Basic = 0 } }
+C_TradeSkillUI = {
+  IsTradeSkillLinked = function() return linked end,
+  GetBaseProfessionInfo = function() return trade and { professionName = trade.name, skillLevel = trade.skill, maxSkillLevel = trade.max } end,
+  GetAllRecipeIDs = function() local t = {} for id in pairs(trade.recipes) do t[#t+1] = id end return t end,
+  GetRecipeInfo = function(id) local r = trade.recipes[id]; return { name = r.name, learned = r.learned ~= false, relativeDifficulty = r.rd } end,
+  GetRecipeSchematic = function(id) local r = trade.recipes[id]; local slots = {}
+    for _, g in ipairs(r.reagents) do slots[#slots+1] = { reagentType = 0, quantityRequired = g[2], reagents = { { itemID = g[1] } } } end
+    return { outputItemID = r.item, quantityMin = 1, quantityMax = 1, reagentSlotSchematics = slots } end,
+}
+C_Item.GetItemNameByID = function(id) return "item"..id end
+Auctionator = { API = { v1 = { GetVendorPriceByItemID=function(_, id) if id == 2320 or id == 3371 then return 10 end end, GetAuctionPriceByItemID=function(caller,id)
+  local p={[4306]=100,[4305]=600,[2996]=50,[2320]=30,[2447]=20,[765]=15,[3371]=40,[118]=500,[13466]=2840,[10620]=4000,[8170]=900,[7909]=30000,[4306]=100} return p[id] end } } }
 ''')
 rt.execute(open(sys.argv[2], encoding="utf-8").read())
 print(rt.eval(r'''(function()
@@ -321,5 +341,38 @@ print(rt.eval(r'''(function()
   cvars.SoftTargetInteractRange = "60"
   SlashCmdList.WINDFALL("sparkle"); SlashCmdList.WINDFALL("sparkle")
   it("option off: back to what was there (60)")
+  -- professions
+  local function pw(label)
+    local P = WindfallProfessionsFrame
+    out[#out+1] = "prof: "..label.." -> ["..tostring(P.charButton.text).."] ["..tostring(P.profButton.text).."] ["..tostring(P.modeButton.text).."] "..tostring(P.skill.text).." | hint: "..tostring(P.hint.text)
+    out[#out+1] = "      "..P.head.name.text.." | "..P.head.cost.text.." | "..P.head.value.text.." | "..tostring(P.head.profit.text)
+    for i = 1, 5 do local r = P.rows[i]; if r.name.text ~= "" then out[#out+1] = "      "..r.name.text.." | "..r.cost.text.." | "..r.value.text.." | "..r.profit.text end end
+  end
+  SlashCmdList.WINDFALL("prof"); pw("before any profession window")
+  player = "Jonis"; class = "PALADIN"
+  trade = { name = "Tailoring", skill = 120, max = 150, recipes = {
+    [101] = { name = "Bolt of Silk Cloth", item = 4305, rd = 0, reagents = { {4306, 4} } },
+    [102] = { name = "Brown Linen Robe", item = 6238, rd = 3, reagents = { {2996, 3}, {2320, 1} } },
+    [103] = { name = "Runed Copper Rod", item = nil, rd = 1, reagents = { {10940, 1} } },
+    [104] = { name = "Not learned", item = 1, rd = 0, learned = false, reagents = {} },
+  } }
+  ev(nil, "TRADE_SKILL_SHOW"); runTimers()
+  pw("tailoring saved, profit view")
+  local P = WindfallProfessionsFrame
+  P.modeButton.onOnClick(P.modeButton); pw("skill-up view")
+  P.rows[1].onOnEnter(P.rows[1]); out[#out+1] = "      tooltip lines: "..table.concat(tipLines, " / ")
+  player = "Altie"; class = "MAGE"
+  trade = { name = "Alchemy", skill = 60, max = 75, recipes = {
+    [201] = { name = "Minor Healing Potion", item = 118, rd = 2, reagents = { {2447, 1}, {765, 1}, {3371, 1} } },
+  } }
+  ev(nil, "TRADE_SKILL_LIST_UPDATE"); runTimers()
+  P.modeButton.onOnClick(P.modeButton)
+  P.charButton.onOnClick(P.charButton); pw("cycled to the other character")
+  P.charButton.onOnClick(P.charButton); pw("cycled again")
+  linked = true; trade = { name = "Engineering", skill = 300, max = 300, recipes = { [301] = { name = "Linked", item = 1, rd = 0, reagents = {} } } }
+  ev(nil, "TRADE_SKILL_SHOW"); runTimers(); linked = false
+  local n = 0; for _ in pairs(WindfallDB.chars["Altie-Realm"].professions) do n = n + 1 end
+  out[#out+1] = "prof: someone else's linked profession saved? Altie professions="..n.." engineering="..tostring(WindfallDB.chars["Altie-Realm"].professions.Engineering ~= nil)
+  StaticPopupDialogs.WINDFALL_FORGET_PROFESSION.OnAccept(); pw("forgot the shown one")
   return table.concat(out, "\n")
 end)()''').replace("|cffffd700g|r","g").replace("|cffc7c7cfs|r","s").replace("|cffeda55fc|r","c"))

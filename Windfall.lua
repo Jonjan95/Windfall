@@ -21,6 +21,7 @@ local historyFrame  -- zone history window, built on first use
 local Refresh, RefreshHistory, ToggleHistory
 local ToggleSettings, RefreshSettings
 local ResetInteract
+local ToggleProfessions, RefreshProfessions
 
 -- ---------------------------------------------------------- item helpers ----
 
@@ -1266,6 +1267,23 @@ local function BuildFrame()
         GameTooltip:Show()
     end)
     f.gear:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    -- Professions.
+    f.prof = CreateFrame("Button", nil, f)
+    f.prof:SetSize(18, 18)
+    f.prof:SetPoint("RIGHT", f.gear, "LEFT", -4, 0)
+    f.prof.icon = f.prof:CreateTexture(nil, "ARTWORK")
+    f.prof.icon:SetAllPoints()
+    f.prof.icon:SetTexture("Interface\\Icons\\Trade_BlackSmithing")
+    f.prof.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    f.prof:SetScript("OnClick", function() ToggleProfessions() end)
+    f.prof:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Professions")
+        GameTooltip:AddLine("What your characters can craft, and what it earns or costs.", 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    f.prof:SetScript("OnLeave", function() GameTooltip:Hide() end)
     f.fish:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         GameTooltip:AddLine("Fishing key: " .. (db.fishKey or "not set")
@@ -1278,7 +1296,7 @@ local function BuildFrame()
         GameTooltip:Show()
     end)
     f.fish:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    f.time:SetPoint("RIGHT", f.gear, "LEFT", -4, 0)
+    f.time:SetPoint("RIGHT", f.prof, "LEFT", -4, 0)
     f.time:SetJustifyH("LEFT")
     f.time:SetWordWrap(false)
 
@@ -1845,6 +1863,12 @@ local function BuildSettingsFrame()
     f.history:SetText("Zone history")
     f.history:SetScript("OnClick", function() ToggleHistory() end)
 
+    f.profs = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    f.profs:SetSize(120, 22)
+    f.profs:SetPoint("LEFT", f.history, "RIGHT", 6, 0)
+    f.profs:SetText("Professions")
+    f.profs:SetScript("OnClick", function() ToggleProfessions() end)
+
     f:SetHeight(-y + 44)
     return f
 end
@@ -1864,6 +1888,420 @@ function ToggleSettings()
     if not settingsFrame then settingsFrame = BuildSettingsFrame() end
     settingsFrame:SetShown(not settingsFrame:IsShown())
     RefreshSettings()
+end
+
+-- ---------------------------------------------------------- professions ----
+
+-- Every character's recipes are saved when one of its profession windows
+-- opens, so alts show up too once you have opened theirs. Prices are looked
+-- up when the window is drawn, so they follow your latest Auctionator scan.
+
+local AH_CUT = 0.05
+local PROF_ROWS = 18
+local PROF_WIDTH = 520
+local DIFFICULTY_BY_NUMBER = { [0] = "optimal", [1] = "medium", [2] = "easy", [3] = "trivial" }
+local DIFFICULTY_COLOR = {
+    optimal = "|cffff8040", medium = "|cffffff00", easy = "|cff40c040", trivial = "|cff808080",
+}
+local DIFFICULTY_LABEL = {
+    optimal = "always gives a skill point", medium = "usually gives a skill point",
+    easy = "sometimes gives a skill point", trivial = "gives no skill",
+}
+
+local function CharacterKey()
+    local name = UnitName("player")
+    local realm = GetRealmName and GetRealmName() or ""
+    return (name or "?") .. "-" .. realm
+end
+
+local function SaveProfession()
+    local T = C_TradeSkillUI
+    if not (T and T.GetAllRecipeIDs and T.GetRecipeInfo and T.GetRecipeSchematic) then return end
+    -- Someone else's profession (a link, a guild list, an NPC) is not yours.
+    for _, check in ipairs({ "IsTradeSkillLinked", "IsTradeSkillGuild", "IsNPCCrafting" }) do
+        if T[check] and T[check]() then return end
+    end
+    local base = T.GetBaseProfessionInfo and T.GetBaseProfessionInfo()
+    if not (base and base.professionName and base.professionName ~= "") then return end
+    local child = T.GetChildProfessionInfo and T.GetChildProfessionInfo()
+    local skillInfo = (child and (child.maxSkillLevel or 0) > 0) and child or base
+
+    local recipes = {}
+    for _, recipeID in ipairs(T.GetAllRecipeIDs() or {}) do
+        local info = T.GetRecipeInfo(recipeID)
+        if info and info.learned and not info.isRecraft and not info.isSalvageRecipe then
+            local ok, schematic = pcall(T.GetRecipeSchematic, recipeID, false)
+            if ok and schematic then
+                local reagents = {}
+                for _, slot in ipairs(schematic.reagentSlotSchematics or {}) do
+                    local first = slot.reagents and slot.reagents[1]
+                    local basic = not (Enum and Enum.CraftingReagentType) or slot.reagentType == Enum.CraftingReagentType.Basic
+                    if basic and first and first.itemID and (slot.quantityRequired or 0) > 0 then
+                        reagents[#reagents + 1] = { first.itemID, slot.quantityRequired }
+                    end
+                end
+                local difficulty = DIFFICULTY_BY_NUMBER[info.relativeDifficulty] or info.difficulty
+                recipes[recipeID] = {
+                    name = info.name,
+                    item = schematic.outputItemID,
+                    qty = ((schematic.quantityMin or 1) + (schematic.quantityMax or schematic.quantityMin or 1)) / 2,
+                    diff = difficulty,
+                    reagents = reagents,
+                }
+            end
+        end
+    end
+    if not next(recipes) then return end
+
+    db.chars = db.chars or {}
+    local key = CharacterKey()
+    local char = db.chars[key] or { professions = {} }
+    db.chars[key] = char
+    local _, class = UnitClass("player")
+    char.class = class
+    char.professions[base.professionName] = {
+        skill = skillInfo.skillLevel, max = skillInfo.maxSkillLevel,
+        saved = time(), recipes = recipes,
+    }
+end
+
+local professionSavePending = false
+local function SaveProfessionSoon()
+    if professionSavePending then return end
+    professionSavePending = true
+    -- The list arrives in pieces; wait for it to settle.
+    C_Timer.After(1, function()
+        professionSavePending = false
+        SaveProfession()
+        if RefreshProfessions then RefreshProfessions() end
+    end)
+end
+
+-- What it costs to get one of a reagent: the cheaper of the auction house
+-- and a vendor that sells it (as Auctionator saw at that vendor).
+local function ReagentPrice(itemID)
+    local ah = AuctionPrice(itemID)
+    local vendor
+    local api = Auctionator and Auctionator.API and Auctionator.API.v1
+    if api and api.GetVendorPriceByItemID then
+        local ok, price = pcall(api.GetVendorPriceByItemID, ADDON, itemID)
+        if ok and type(price) == "number" and price > 0 then vendor = price end
+    end
+    if ah and vendor then return math.min(ah, vendor), vendor < ah end
+    return ah or vendor, vendor ~= nil
+end
+
+-- Cost, value and profit of one craft. Value is what the result sells for
+-- after the auction house cut, or what a vendor pays if that is more.
+local function CraftNumbers(recipe)
+    local cost, missing = 0, false
+    for _, r in ipairs(recipe.reagents) do
+        local price = ReagentPrice(r[1])
+        if price then cost = cost + price * r[2] else missing = true end
+    end
+    local value
+    if recipe.item then
+        local ah, sell = AuctionPrice(recipe.item), VendorPrice(recipe.item)
+        local fromAH = ah and ah * (1 - AH_CUT)
+        if fromAH or sell then value = math.max(fromAH or 0, sell or 0) * recipe.qty end
+    end
+    local profit = (value and not missing) and (value - cost) or nil
+    return cost, value, profit, missing
+end
+
+local profFrame, profView = nil, { char = nil, prof = nil, mode = "profit", offset = 0 }
+local profList = {}
+
+local function SortedKeys(t)
+    local keys = {}
+    for k in pairs(t or {}) do keys[#keys + 1] = k end
+    table.sort(keys)
+    return keys
+end
+
+local function SignedMoney(copper)
+    if copper < 0 then return "|cffff6060-" .. Money(-copper) .. "|r" end
+    return "|cff7fd36b" .. Money(copper) .. "|r"
+end
+
+-- Picks the character and profession to show, falling back to what exists.
+local function CurrentProfession()
+    local chars = db.chars or {}
+    if not chars[profView.char] then
+        profView.char = chars[CharacterKey()] and CharacterKey() or SortedKeys(chars)[1]
+    end
+    local char = chars[profView.char]
+    if not char then return nil end
+    if not char.professions[profView.prof] then profView.prof = SortedKeys(char.professions)[1] end
+    return char, char.professions[profView.prof]
+end
+
+local function ShortName(key)
+    return (key or ""):match("^(.-)%-") or key
+end
+
+local function ClassColored(char, key)
+    local c = char and RAID_CLASS_COLORS and RAID_CLASS_COLORS[char.class]
+    return c and string.format("|cff%02x%02x%02x%s|r", c.r * 255, c.g * 255, c.b * 255, ShortName(key)) or ShortName(key)
+end
+
+local function BuildProfList(prof)
+    local list = {}
+    for recipeID, recipe in pairs(prof.recipes) do
+        local cost, value, profit, missing = CraftNumbers(recipe)
+        local skillUp = recipe.diff ~= "trivial"
+        if profView.mode == "profit" or skillUp then
+            list[#list + 1] = { id = recipeID, recipe = recipe, cost = cost, value = value,
+                profit = profit, missing = missing }
+        end
+    end
+    if profView.mode == "profit" then
+        -- Best profit first; recipes that cannot be priced go last.
+        table.sort(list, function(a, b)
+            if (a.profit ~= nil) ~= (b.profit ~= nil) then return a.profit ~= nil end
+            if a.profit and a.profit ~= b.profit then return a.profit > b.profit end
+            return (a.recipe.name or "") < (b.recipe.name or "")
+        end)
+    else
+        -- Skill-up: what a point costs. A craft that sells covers part of
+        -- its own cost; orange counts fully, yellow and green less.
+        local chance = { optimal = 1, medium = 0.75, easy = 0.25 }
+        for _, e in ipairs(list) do
+            if not e.missing then
+                -- Below zero: the craft sells for more than it costs.
+                local net = e.cost - (e.value or 0)
+                e.perPoint = net / (chance[e.recipe.diff] or 0.25)
+            end
+        end
+        table.sort(list, function(a, b)
+            if (a.perPoint ~= nil) ~= (b.perPoint ~= nil) then return a.perPoint ~= nil end
+            if a.perPoint and a.perPoint ~= b.perPoint then return a.perPoint < b.perPoint end
+            return (a.recipe.name or "") < (b.recipe.name or "")
+        end)
+    end
+    return list
+end
+
+local function RecipeTooltip(row)
+    local e = row.entry
+    if not e then return end
+    local recipe = e.recipe
+    GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
+    GameTooltip:AddLine((DIFFICULTY_COLOR[recipe.diff] or "") .. (recipe.name or "?") .. "|r")
+    if DIFFICULTY_LABEL[recipe.diff] then GameTooltip:AddLine(DIFFICULTY_LABEL[recipe.diff], 0.7, 0.7, 0.7) end
+    GameTooltip:AddLine(" ")
+    for _, r in ipairs(recipe.reagents) do
+        local price, fromVendor = ReagentPrice(r[1])
+        local name = (C_Item and C_Item.GetItemNameByID and C_Item.GetItemNameByID(r[1])) or ("item " .. r[1])
+        GameTooltip:AddDoubleLine(string.format("%dx %s", r[2], name),
+            price and (Money(price * r[2]) .. (fromVendor and " |cff888888vendor|r" or "")) or "|cffff6060no price|r",
+            1, 1, 1, 1, 1, 1)
+    end
+    GameTooltip:AddLine(" ")
+    GameTooltip:AddDoubleLine("Cost", Money(e.cost) .. (e.missing and " |cffff6060+ unpriced|r" or ""), 1, 0.82, 0, 1, 1, 1)
+    if e.value then
+        GameTooltip:AddDoubleLine("Sells for", Money(e.value) .. (recipe.qty ~= 1 and string.format(" (%gx)", recipe.qty) or ""),
+            1, 0.82, 0, 1, 1, 1)
+    elseif not recipe.item then
+        GameTooltip:AddLine("Makes no item to sell (an enchant or similar).", 0.7, 0.7, 0.7, true)
+    end
+    if e.profit then GameTooltip:AddDoubleLine("Profit", SignedMoney(e.profit), 1, 0.82, 0, 1, 1, 1) end
+    GameTooltip:AddLine("Sale value is after the 5% auction house cut.", 0.5, 0.5, 0.5, true)
+    GameTooltip:Show()
+end
+
+local function BuildProfessionsFrame()
+    local f = MakeWindow("WindfallProfessionsFrame", "professions", PROF_WIDTH)
+    f:SetHeight(84 + PROF_ROWS * ROW_H + 40)
+
+    f.charButton = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    f.charButton:SetSize(150, 20)
+    f.charButton:SetPoint("TOPLEFT", 10, -32)
+    f.charButton:SetScript("OnClick", function()
+        local keys = SortedKeys(db.chars)
+        for i, k in ipairs(keys) do
+            if k == profView.char then profView.char = keys[i % #keys + 1] break end
+        end
+        profView.prof, profView.offset = nil, 0
+        RefreshProfessions()
+    end)
+
+    f.profButton = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    f.profButton:SetSize(130, 20)
+    f.profButton:SetPoint("LEFT", f.charButton, "RIGHT", 6, 0)
+    f.profButton:SetScript("OnClick", function()
+        local char = CurrentProfession()
+        local keys = SortedKeys(char and char.professions)
+        for i, k in ipairs(keys) do
+            if k == profView.prof then profView.prof = keys[i % #keys + 1] break end
+        end
+        profView.offset = 0
+        RefreshProfessions()
+    end)
+
+    f.modeButton = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    f.modeButton:SetSize(130, 20)
+    f.modeButton:SetPoint("LEFT", f.profButton, "RIGHT", 6, 0)
+    f.modeButton:SetScript("OnClick", function()
+        profView.mode = profView.mode == "profit" and "skill" or "profit"
+        profView.offset = 0
+        RefreshProfessions()
+    end)
+
+    f.skill = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    f.skill:SetPoint("TOPRIGHT", -14, -36)
+
+    local function Column(row, template)
+        row.name = f:CreateFontString(nil, "OVERLAY", template)
+        row.name:SetWidth(PROF_WIDTH - 290)
+        row.name:SetJustifyH("LEFT")
+        row.name:SetWordWrap(false)
+        row.cost = f:CreateFontString(nil, "OVERLAY", template)
+        row.value = f:CreateFontString(nil, "OVERLAY", template)
+        row.profit = f:CreateFontString(nil, "OVERLAY", template)
+    end
+    local function Place(row, y)
+        row.name:SetPoint("TOPLEFT", 12, y)
+        row.cost:SetPoint("TOPRIGHT", -196, y)
+        row.value:SetPoint("TOPRIGHT", -104, y)
+        row.profit:SetPoint("TOPRIGHT", -14, y)
+    end
+    f.head = {}
+    Column(f.head, "GameFontDisableSmall")
+    Place(f.head, -62)
+    f.head.name:SetText("Recipe")
+    f.head.cost:SetText("Cost")
+    f.head.value:SetText("Sells for")
+
+    f.rows = {}
+    for i = 1, PROF_ROWS do
+        local y = -78 - (i - 1) * ROW_H
+        local row = CreateFrame("Button", nil, f)
+        row:SetPoint("TOPLEFT", 8, y + 2)
+        row:SetSize(PROF_WIDTH - 16, ROW_H)
+        row:SetScript("OnEnter", RecipeTooltip)
+        row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        Column(row, "GameFontHighlightSmall")
+        Place(row, y)
+        f.rows[i] = row
+    end
+
+    f:EnableMouseWheel(true)
+    f:SetScript("OnMouseWheel", function(_, delta)
+        local maxOffset = math.max(0, #profList - PROF_ROWS)
+        profView.offset = math.max(0, math.min(maxOffset, profView.offset - delta * 3))
+        RefreshProfessions()
+    end)
+
+    f.hint = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    f.hint:SetPoint("BOTTOMLEFT", 12, 14)
+    f.hint:SetWidth(PROF_WIDTH - 130)
+    f.hint:SetJustifyH("LEFT")
+
+    f.forget = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    f.forget:SetSize(110, 20)
+    f.forget:SetPoint("BOTTOMRIGHT", -10, 10)
+    f.forget:SetText("Forget this")
+    f.forget:SetScript("OnClick", function()
+        if StaticPopup_Show then StaticPopup_Show("WINDFALL_FORGET_PROFESSION") end
+    end)
+    return f
+end
+
+if StaticPopupDialogs then
+    StaticPopupDialogs["WINDFALL_FORGET_PROFESSION"] = {
+        text = "Forget this character's saved profession in Windfall?",
+        button1 = YES or "Yes",
+        button2 = NO or "No",
+        OnAccept = function()
+            local char = db.chars and db.chars[profView.char]
+            if char then
+                char.professions[profView.prof or ""] = nil
+                if not next(char.professions) then db.chars[profView.char] = nil end
+            end
+            profView.prof, profView.offset = nil, 0
+            RefreshProfessions()
+        end,
+        timeout = 0,
+        whileDead = true,
+        hideOnEscape = true,
+    }
+end
+
+function RefreshProfessions()
+    if not (profFrame and profFrame:IsShown()) then return end
+    local f = profFrame
+    local char, prof = CurrentProfession()
+    f.modeButton:SetText(profView.mode == "profit" and "Best profit" or "Cheapest skill-up")
+    f.head.profit:SetText(profView.mode == "profit" and "Profit" or "Per point")
+    if not prof then
+        profList = {}
+        f.charButton:SetText("No characters")
+        f.profButton:SetText("-")
+        f.skill:SetText("")
+        for _, row in ipairs(f.rows) do
+            row.entry = nil
+            row.name:SetText("") row.cost:SetText("") row.value:SetText("") row.profit:SetText("")
+        end
+        f.hint:SetText("Open a profession window on any character and it is saved here.")
+        f.forget:Hide()
+        return
+    end
+    f.forget:Show()
+    f.charButton:SetText(ClassColored(char, profView.char))
+    f.profButton:SetText(profView.prof)
+    f.skill:SetText(string.format("Skill %d / %d", prof.skill or 0, prof.max or 0))
+
+    profList = BuildProfList(prof)
+    profView.offset = math.max(0, math.min(profView.offset, #profList - PROF_ROWS))
+    for i, row in ipairs(f.rows) do
+        local e = profList[i + profView.offset]
+        row.entry = e
+        if e then
+            row.name:SetText((DIFFICULTY_COLOR[e.recipe.diff] or "|cffffffff") .. (e.recipe.name or "?") .. "|r")
+            if e.missing and e.cost == 0 then
+                row.cost:SetText("|cff888888?|r")
+            else
+                row.cost:SetText(Money(e.cost) .. (e.missing and "|cffff6060*|r" or ""))
+            end
+            row.value:SetText(e.value and Money(e.value) or (e.recipe.item and "|cff888888-|r" or "|cff888888no item|r"))
+            if profView.mode == "profit" then
+                row.profit:SetText(e.profit and SignedMoney(e.profit) or "|cff888888?|r")
+            else
+                if not e.perPoint then
+                    row.profit:SetText("|cff888888?|r")
+                elseif e.perPoint <= 0 then
+                    row.profit:SetText("|cff7fd36bearns " .. Money(-e.perPoint) .. "|r")
+                else
+                    row.profit:SetText(Money(e.perPoint))
+                end
+            end
+        else
+            row.name:SetText("") row.cost:SetText("") row.value:SetText("") row.profit:SetText("")
+        end
+    end
+
+    local age = math.floor((time() - (prof.saved or time())) / 86400)
+    local hint = (age >= 1 and string.format("Saved %d day%s ago. ", age, age == 1 and "" or "s") or "")
+        .. (profView.mode == "skill" and "Orange, yellow and green recipes, by what a skill point costs. " or "")
+        .. "* = a reagent has no price."
+        .. (#profList > PROF_ROWS and " Scroll for more." or "")
+    f.hint:SetText(hint)
+end
+
+function ToggleProfessions()
+    if not profFrame then profFrame = BuildProfessionsFrame() end
+    profFrame:SetShown(not profFrame:IsShown())
+    if profFrame:IsShown() then
+        profView.char, profView.prof = nil, nil
+        -- Open on the profession window you have open, if any.
+        local base = C_TradeSkillUI and C_TradeSkillUI.GetBaseProfessionInfo and C_TradeSkillUI.GetBaseProfessionInfo()
+        if base and base.professionName then
+            profView.char, profView.prof = CharacterKey(), base.professionName
+        end
+        profView.offset = 0
+    end
+    RefreshProfessions()
 end
 
 local FISH_OPTIONS = {
@@ -1909,6 +2347,8 @@ SlashCmdList["WINDFALL"] = function(msg)
         ToggleHistory()
     elseif msg == "discard" then
         Reset(true)
+    elseif msg == "prof" or msg == "profs" or msg == "professions" then
+        ToggleProfessions()
     elseif msg == "sparkle" or msg == "sparkles" then
         Windfall_ToggleSparkles()
     elseif msg == "minimap" then
@@ -1918,7 +2358,7 @@ SlashCmdList["WINDFALL"] = function(msg)
     elseif msg == "" or msg == "show" or msg == "hide" or msg == "toggle" then
         Windfall_ToggleWindow()
     else
-        print("|cff7fd36bWindfall|r: /wf (show or hide), /wf settings, /wf zones (zone history), /wf gather, /wf loot, /wf start, /wf pause, /wf reset (save and start over), /wf discard, /wf fish (fishing key on or off), /wf fishkey (choose the key), /wf sparkle (node sparkles on or off)")
+        print("|cff7fd36bWindfall|r: /wf (show or hide), /wf settings, /wf zones (zone history), /wf gather, /wf loot, /wf start, /wf pause, /wf reset (save and start over), /wf discard, /wf fish (fishing key on or off), /wf fishkey (choose the key), /wf sparkle (node sparkles on or off), /wf prof (professions)")
     end
 end
 
@@ -1943,6 +2383,8 @@ events:RegisterEvent("PLAYER_REGEN_ENABLED")
 events:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
 events:RegisterEvent("ZONE_CHANGED_NEW_AREA")
 pcall(events.RegisterEvent, events, "SKILL_LINES_CHANGED") -- may not exist on every client
+pcall(events.RegisterEvent, events, "TRADE_SKILL_SHOW")
+pcall(events.RegisterEvent, events, "TRADE_SKILL_LIST_UPDATE")
 events:SetScript("OnEvent", function(_, event, arg1, _, arg3)
     if event == "ADDON_LOADED" then
         if arg1 ~= ADDON then return end
@@ -1984,6 +2426,8 @@ events:SetScript("OnEvent", function(_, event, arg1, _, arg3)
     elseif event == "PLAYER_EQUIPMENT_CHANGED" then
         if arg1 == 16 then OnMainHandChanged() end
         if db.fishOn then Refresh() end
+    elseif event == "TRADE_SKILL_SHOW" or event == "TRADE_SKILL_LIST_UPDATE" then
+        SaveProfessionSoon()
     elseif event == "ZONE_CHANGED_NEW_AREA" or event == "SKILL_LINES_CHANGED" then
         -- Zone, skill and lure all change the getaway line.
         if db.fishOn and frame and frame:IsShown() then Refresh() end

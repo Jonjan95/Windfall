@@ -2,6 +2,10 @@
 
 All changes to Windfall, newest first. After an update, type `/reload` in game (or restart the game when the notes say so).
 
+## [0.2.17] - 2026-11-15
+
+- **Professions:** a new window (the anvil icon in the title bar, or `/wf prof`) shows every recipe a character knows with what the reagents cost, what the result sells for after the auction house cut, and the profit. Switch to *Cheapest skill-up* to see which orange, yellow and green recipes level the profession for the least gold. Open each profession window once on every character, and your alts show up too. No pop-ups.
+
 ## [0.2.16] - 2026-11-15
 
 - **No more name plates on guards and vendors while sparkles are on.** The name plate the sparkle sits on is now switched on only while the nearest thing is a herb, ore vein or fishing pool.

@@ -11,6 +11,10 @@ A World of Warcraft Forever addon that shows what your farming is worth: the val
 - **Calm numbers:** the window redraws when you loot something or once a minute.
 - **Zone history:** Reset saves the session per zone. The Zones window ranks zones by gold per hour, so you can tell which spot is worth farming.
 
+## Professions
+
+The anvil icon in the title bar (or `/wf prof`) opens a window with every recipe a character knows: what the reagents cost (the cheaper of the auction house and a vendor), what the result sells for after the 5% auction house cut, and the profit. *Cheapest skill-up* lists the recipes that can still raise your skill by what a skill point costs. Recipes are saved when you open a profession window, on every character, so alts show up too.
+
 ## Node sparkles
 
 Switched on in the settings, the nearest herb, ore vein or fishing pool close by gets a sparkle and the game's gather icon. Quest objects, chests and NPCs get nothing. Each kind can be switched off on its own.
@@ -40,6 +44,7 @@ Every option is a checkbox in the settings window (the gear icon in the title ba
 | `/wf fish` | Fishing key on or off |
 | `/wf fishkey` | Choose the fishing key |
 | `/wf sparkle` | Node sparkles on or off |
+| `/wf prof` | Professions window |
 
 Key bindings for the fishing switch, node sparkles and the window are under Options > Keybindings > AddOns > Windfall.
 
