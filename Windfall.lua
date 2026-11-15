@@ -1442,6 +1442,7 @@ local function Select(page)
     rawShow(page)
     page:ClearAllPoints()
     page:SetPoint("TOPLEFT", inset, "TOPLEFT", 4, page.pageOffset or 22)
+    page:SetPoint("BOTTOMRIGHT", inset, "BOTTOMRIGHT", -4, 4)
     SelectTab(page.pageKey)
     if headerRefresh then headerRefresh(page.pageKey) end
     if not docked and not placed then
@@ -2452,9 +2453,23 @@ local function ShortName(key)
     return (key or ""):match("^(.-)%-") or key
 end
 
+-- A character's name, with the realm added when another saved character
+-- has the same name.
+local function DisplayName(key)
+    local name = ShortName(key)
+    for other in pairs(db.chars or {}) do
+        if other ~= key and ShortName(other) == name then
+            local realm = (key or ""):match("^.-%-(.+)$")
+            return realm and (name .. " |cff999999(" .. realm .. ")|r") or name
+        end
+    end
+    return name
+end
+
 local function ClassColored(char, key)
     local c = char and RAID_CLASS_COLORS and RAID_CLASS_COLORS[char.class]
-    return c and string.format("|cff%02x%02x%02x%s|r", c.r * 255, c.g * 255, c.b * 255, ShortName(key)) or ShortName(key)
+    local name = DisplayName(key)
+    return c and string.format("|cff%02x%02x%02x%s|r", c.r * 255, c.g * 255, c.b * 255, name) or name
 end
 
 local function BuildProfitList(prof)
@@ -3055,7 +3070,7 @@ local function ToggleCharMenu(anchor)
             row.text:SetWordWrap(false)
             row:SetScript("OnClick", function(self)
                 if IsShiftKeyDown and IsShiftKeyDown() then
-                    if StaticPopup_Show then StaticPopup_Show("WINDFALL_FORGET_CHARACTER", ShortName(self.key), nil, self.key) end
+                    if StaticPopup_Show then StaticPopup_Show("WINDFALL_FORGET_CHARACTER", DisplayName(self.key), nil, self.key) end
                     return
                 end
                 charMenu:Hide()
@@ -3065,7 +3080,7 @@ local function ToggleCharMenu(anchor)
             end)
             row:SetScript("OnEnter", function(self)
                 GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                GameTooltip:AddLine(ShortName(self.key))
+                GameTooltip:AddLine(DisplayName(self.key))
                 GameTooltip:AddLine("Shift-click: forget this character in Windfall.", 0.6, 0.6, 0.6, true)
                 GameTooltip:Show()
             end)
@@ -3104,7 +3119,7 @@ local function BuildHeader()
     header, headerPanel = PanelHeader()
     -- Character picker.
     header.char = CreateFrame("Button", nil, header, "UIPanelButtonTemplate")
-    header.char:SetSize(150, 22)
+    header.char:SetSize(200, 22)
     header.char:SetPoint("LEFT", 0, 0)
     header.char:SetScript("OnClick", function(self) ToggleCharMenu(self) end)
     header.char:SetScript("OnEnter", function(self)
@@ -3683,6 +3698,16 @@ function RefreshShoppingList()
     f.matHead:SetPoint("TOPLEFT", 12, top - 4)
 
     local total, missing, anyHere = 0, false, false
+    -- Everything counts in the total, also what does not fit in the rows.
+    for i = #f.rows + 1, #shop.items do
+        local item = shop.items[i]
+        local buy = math.max(0, item.need * (shop.single and shop.crafts or 1) - BagCountOf(item.id))
+        local price = ReagentPrice(item.id)
+        if buy > 0 then
+            if price then total = total + price * buy else missing = true end
+        end
+    end
+    local hidden = math.max(0, #shop.items - #f.rows)
     for i, row in ipairs(f.rows) do
         local item = shop.items[i]
         local y = top - 22 - (i - 1) * 20
@@ -3721,9 +3746,10 @@ function RefreshShoppingList()
             row:Hide()
         end
     end
-    f.sum:SetText("Left to buy: " .. Money(total) .. (missing and " |cffff6060+ unpriced|r" or ""))
+    f.sum:SetText("Left to buy: " .. Money(total) .. (missing and " |cffff6060+ unpriced|r" or "")
+        .. (hidden > 0 and string.format("  |cff999999(and %d more material%s, buy them as the route gets there)|r",
+            hidden, hidden == 1 and "" or "s") or ""))
     f.buyAll:SetShown(anyHere)
-    f:SetHeight(-top + 22 + #shop.items * 20 + 70)
 end
 
 local function BuildShoppingFrame()

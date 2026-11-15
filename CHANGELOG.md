@@ -2,6 +2,12 @@
 
 All changes to Windfall, newest first. After an update, type `/reload` in game (or restart the game when the notes say so).
 
+## [0.2.36] - 2026-11-15
+
+- **Nothing runs off the bottom of the window any more.** Every tab now fills the window, so "Left to buy" and the status line stay at its bottom, also when you plan further.
+- **Characters with the same name are told apart:** the character list adds the realm when two of your saved characters share a name. They were always saved separately; now you can see which is which.
+- **All materials count in "Left to buy"**, also when a long route needs more than fit in the list, and the line says how many more there are.
+
 ## [0.2.35] - 2026-11-15
 
 **A real WoW window, with professions first.**

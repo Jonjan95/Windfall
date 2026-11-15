@@ -591,6 +591,12 @@ print(rt.eval(r'''(function()
   local rows = {}; for _, r in ipairs(WindfallCharMenu.rows) do if r:IsShown() then rows[#rows+1] = r.text.text end end
   out[#out+1] = "header: character menu -> "..table.concat(rows, " || ")
   WindfallCharMenu:Hide()
+  -- a second Huntie on another realm
+  WindfallDB.chars["Huntie-Other Realm"] = { class = "HUNTER", professions = { Tailoring = { skill = 40, max = 75, recipes = {} } } }
+  WindfallCharMenu:Hide(); H.char.onOnClick(H.char)
+  rows = {}; for _, r in ipairs(WindfallCharMenu.rows) do if r:IsShown() then rows[#rows+1] = r.text.text end end
+  out[#out+1] = "header: two Hunties -> "..table.concat(rows, " || ").." | button="..tostring(H.char.text)
+  WindfallCharMenu:Hide(); WindfallDB.chars["Huntie-Other Realm"] = nil
   B.money.onOnClick(B.money, "LeftButton"); pn("gold per hour on the bar")
   B.menu.onOnClick(B.menu); pn("Windfall icon again")
   -- at a vendor with the panel closed: it opens next to the vendor, and closes again after
