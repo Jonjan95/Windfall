@@ -2,6 +2,10 @@
 
 All changes to Windfall, newest first. After an update, type `/reload` in game (or restart the game when the notes say so).
 
+## [0.2.33] - 2026-11-15
+
+- **Enough materials for unlucky skill-ups.** Yellow and green crafts give a point only some of the time, and the route used to buy for the average number of crafts, so about half the time you ran short. It now adds a spare worked out from each step's chance, enough about five times out of six. Orange crafts never miss and get no spare.
+
 ## [0.2.32] - 2026-11-15
 
 - **Ranks you are too low for no longer stop the route.** When a rank needs a higher character level (Expert needs level 20), the route keeps you crafting up to your current skill cap and then says how far you are capped and why. Once you reach the level, the "train" step appears where it should.

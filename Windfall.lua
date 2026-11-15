@@ -2730,6 +2730,7 @@ local function BuildRoute(prof, target, charLevel)
     end
 
     local steps, crafts, trained, gaps = {}, {}, {}, {}
+    local spread = {} -- per recipe: how much the number of crafts can vary with luck
     local current
     local cap = prof.max or 0
     local blocked
@@ -2775,6 +2776,8 @@ local function BuildRoute(prof, target, charLevel)
         else
             trained[best.id] = true
             crafts[best.id] = (crafts[best.id] or 0) + 1 / bestChance
+            -- Tries for one point vary (a geometric spread): (1 - chance) / chance^2.
+            spread[best.id] = (spread[best.id] or 0) + (1 - bestChance) / (bestChance * bestChance)
             if current and current.p == best then
                 current.to = level + 1
                 current.crafts = current.crafts + 1 / bestChance
@@ -2785,12 +2788,14 @@ local function BuildRoute(prof, target, charLevel)
         end
     end
 
-    -- Materials for every craft, rounded up per recipe.
+    -- Materials for every craft, rounded up per recipe, plus a spare for bad
+    -- luck on yellow and green crafts: one standard deviation, enough about
+    -- five times out of six. Orange crafts never miss and get none.
     local need, order, trainCost = {}, {}, 0
     for _, p in ipairs(pool) do
         local n = crafts[p.id]
         if n then
-            n = math.ceil(n - 0.001)
+            n = math.ceil(n + math.sqrt(spread[p.id] or 0) - 0.001)
             if p.train > 0 then trainCost = trainCost + p.train end
             for _, r in ipairs(p.recipe.reagents) do
                 if not need[r[1]] then order[#order + 1] = r[1] end
@@ -3373,7 +3378,7 @@ local function FillRoute(keepStatus)
     end
     shop.items = items
     if not keepStatus and trainCost > 0 then
-        Status("Trainer recipes on this route: " .. Money(trainCost) .. ". Counts are an estimate.")
+        Status("Trainer recipes on this route: " .. Money(trainCost) .. ". Materials include a spare for unlucky skill-ups.")
     end
 end
 
