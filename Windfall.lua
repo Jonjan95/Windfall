@@ -30,6 +30,7 @@ local ToggleProfessions, RefreshProfessions, RefreshHeader
 local NewPage, TogglePanel, DockPanel, UndockPanel, PageOpeners
 local PanelHeader, SetPanelHeaderRefresh, SetPanelPortrait, CurrentSelection, NoteCharacter, CharacterKeyNow
 local SaveInventory, SetBankOpen, HaveCount, TopProfit, CanMake, ShowRecipeDetail
+local PB, ComputeRoute -- shared with the profession window page
 local bar, BuildBar, UpdateBar, UpdateBarIcons
 local FISH_ICON, fishingNow, UpdateFishIcon, StartKeyCapture, ReleaseCVars, FishingSkill, OnLureCastStart, OnLureCastSucceeded, OnLureCastEnded
 local UpdateAutoLoot, SetFishing, SetFishKey, OnMainHandChanged, OnCombatEnded, OnChannelStart, OnChannelStop, InitFishing
@@ -2346,6 +2347,8 @@ local function SaveProfession()
             local recipe = ReadRecipe(recipeID, info.name)
             if recipe then
                 recipe.diff = DIFFICULTY_BY_NUMBER[info.relativeDifficulty] or info.difficulty
+                local category = info.categoryID and T.GetCategoryInfo and T.GetCategoryInfo(info.categoryID)
+                recipe.cat = category and category.name
                 recipes[recipeID] = recipe
             end
         end
@@ -3306,6 +3309,7 @@ local function Choose(charKey, profName)
     profView.char, profView.prof, profView.offset, profView.target = charKey, profName, 0, nil
     profView.chosen = true -- picked by hand: stay on it
     CurrentProfession()
+    if PB and PB.onChoose then PB.onChoose() end
     if headerPanel and headerPanel:IsShown() then
         if WindfallShoppingFrame and WindfallShoppingFrame:IsShown() then
             PageOpeners.route()
@@ -3339,6 +3343,8 @@ local function ToggleCharMenu(anchor)
         charMenu.rows = {}
         if UISpecialFrames then table.insert(UISpecialFrames, "WindfallCharMenu") end
     end
+    charMenu:SetParent(anchor)
+    charMenu:SetFrameStrata("DIALOG")
     charMenu:ClearAllPoints()
     charMenu:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -2)
     -- This character first, then the others.
@@ -3512,6 +3518,12 @@ function RefreshHeader(key)
 end
 
 SetPanelHeaderRefresh(function(key) RefreshHeader(key) end)
+
+PB = {
+    view = profView, CurrentProfession = CurrentProfession, Choose = Choose, ToggleCharMenu = ToggleCharMenu,
+    ProfessionIcon = ProfessionIcon, BuildProfitList = BuildProfitList, ClassColored = ClassColored,
+    DisplayName = DisplayName, SortedKeys = SortedKeys, CharacterKey = CharacterKey,
+}
 end
 
 -- Route and shopping list, in a block of their own (the 200-locals limit).
@@ -4252,6 +4264,8 @@ function ShowShoppingList(recipe)
     OpenShopping()
 end
 
+ComputeRoute = BuildRoute
+
 -- What to do for a rank, by where it comes from.
 function RankAction(rank, how)
     if how == "vendor" then return "buy the " .. rank .. " book from a vendor" end
@@ -4339,6 +4353,631 @@ function RebuildRoute()
     FillRoute(true)
     RefreshShoppingList()
 end
+end
+
+-- ---------------------------------------------------- profession window ----
+
+-- Windfall inside the game's profession window: a side tab next to the
+-- profession tabs, and a page over the window's content laid out like the
+-- game's own (recipe list with categories on the left, the recipe on the
+-- right), for any of your characters. The game's profession tabs switch back.
+-- Everything sits in one table here, for the 200-locals limit.
+do
+local NP = { mode = "recipes", offset = 0, collapsed = {} }
+local LIST_ROWS = 22
+local ROW = 22
+
+function NP.Make(kind, name, parent, template)
+    if template then
+        local ok, f = pcall(CreateFrame, kind, name, parent, template)
+        if ok and f then return f end
+    end
+    return CreateFrame(kind, name, parent)
+end
+
+function NP.Part(frame, key)
+    local part = frame and frame[key]
+    return type(part) == "table" and part or nil
+end
+
+function NP.Atlas(texture, atlas)
+    return texture.SetAtlas and pcall(texture.SetAtlas, texture, atlas) or false
+end
+
+-- What the page shows: the character and profession picked in Windfall.
+function NP.Selection()
+    local char, prof = PB.CurrentProfession()
+    return char, prof, PB.view
+end
+
+function NP.IsMine()
+    return PB.view.char == PB.CharacterKey()
+end
+
+function NP.ProfessionOpen(line)
+    local T = C_TradeSkillUI
+    if not (T and T.IsTradeSkillReady and T.IsTradeSkillReady()) then return false end
+    local base = T.GetBaseProfessionInfo and T.GetBaseProfessionInfo()
+    return base and SkillLineOf(base) == line
+end
+
+-- Create: only for the character you are on, from its own profession.
+function NP.Craft(recipeID, count)
+    local _, prof = NP.Selection()
+    if not (prof and NP.IsMine() and count and count > 0) then return end
+    local T = C_TradeSkillUI
+    if not NP.ProfessionOpen(prof.line) then
+        if T.OpenTradeSkill then T.OpenTradeSkill(prof.line) end
+        return
+    end
+    T.CraftRecipe(recipeID, count)
+end
+
+-- The list: categories with their recipes (Recipes), or the route (Levelling).
+function NP.BuildList(prof)
+    local nodes = {}
+    local search = NP.search and NP.search:GetText()
+    search = type(search) == "string" and search:lower() or ""
+    if NP.mode == "levelling" then
+        local char = (db.chars or {})[PB.view.char]
+        local target = PB.view.target or RouteTarget(prof.skill or 1)
+        local steps = ComputeRoute(prof, target, char and char.level)
+        nodes[#nodes + 1] = { header = string.format("Route to %d", target) }
+        for _, st in ipairs(steps) do
+            if st.rank then
+                nodes[#nodes + 1] = { text = string.format("|cffffd100%d: %s|r", st.at, RankAction(st.rank, st.how)) }
+            else
+                local crafts = math.ceil(st.crafts - 0.001)
+                nodes[#nodes + 1] = { id = st.p.id, recipe = st.p.recipe, crafts = crafts,
+                    text = string.format("%d-%d  %s%s|r x%d%s", st.from, st.to,
+                        DIFFICULTY_COLOR[select(2, SkillUpChance(st.p.id, st.p.unlock, st.from)) or ""] or "",
+                        st.p.recipe.name or "?", crafts, st.p.train > 0 and " |cff888888(train)|r" or "") }
+            end
+        end
+        if #nodes == 1 then
+            nodes[2] = { text = (prof.skill or 0) >= (prof.max or 0) and (prof.max or 0) > 0
+                and "|cff7fd36bMaxed for now.|r |cff999999The Recipes view shows what earns.|r"
+                or "|cff999999No priced recipe for the next points: scan the auction house.|r" }
+        end
+        return nodes
+    end
+    local groups, names = {}, {}
+    for id, recipe in pairs(prof.recipes) do
+        if search == "" or (recipe.name or ""):lower():find(search, 1, true) then
+            local cat = recipe.cat or "Recipes"
+            if not groups[cat] then groups[cat] = {}; names[#names + 1] = cat end
+            table.insert(groups[cat], { id = id, recipe = recipe })
+        end
+    end
+    table.sort(names)
+    local order = { optimal = 1, medium = 2, easy = 3, trivial = 4 }
+    for _, cat in ipairs(names) do
+        nodes[#nodes + 1] = { header = cat, count = #groups[cat] }
+        if not NP.collapsed[cat] then
+            table.sort(groups[cat], function(a, b)
+                local x, y = order[a.recipe.diff] or 5, order[b.recipe.diff] or 5
+                if x ~= y then return x < y end
+                return (a.recipe.name or "") < (b.recipe.name or "")
+            end)
+            for _, e in ipairs(groups[cat]) do
+                local can = CanMake(PB.view.char, e.recipe)
+                e.text = (DIFFICULTY_COLOR[e.recipe.diff] or "|cffffffff") .. (e.recipe.name or "?") .. "|r"
+                    .. (can > 0 and string.format(" |cffffffff[%d]|r", can) or "")
+                nodes[#nodes + 1] = e
+            end
+        end
+    end
+    if #nodes == 0 then
+        nodes[1] = { text = prof.unloaded and "|cff999999Not loaded yet: open this profession once on its character.|r"
+            or "|cff999999No recipes match.|r" }
+    end
+    return nodes
+end
+
+function NP.Refresh()
+    local page = NP.page
+    if not (page and page:IsShown()) then return end
+    local char, prof = NP.Selection()
+    NP.RefreshHeader(char, prof)
+    if not prof then
+        NP.nodes = { { text = "|cff999999No professions saved yet.|r" } }
+    else
+        SyncLearned(prof, PB.view.char)
+        NP.nodes = NP.BuildList(prof)
+    end
+    -- default selection: the route's first step, or the first recipe
+    local found
+    for _, n in ipairs(NP.nodes) do
+        if n.id and n.id == NP.selected then found = n end
+    end
+    if not found then
+        for _, n in ipairs(NP.nodes) do
+            if n.id then found = n break end
+        end
+    end
+    NP.selected = found and found.id
+    NP.selectedNode = found
+    NP.offset = math.max(0, math.min(NP.offset, #NP.nodes - LIST_ROWS))
+    NP.DrawList()
+    NP.DrawDetail(prof)
+    for key, b in pairs(NP.modeButtons) do
+        local text = b:GetFontString()
+        if text then text:SetTextColor(key == NP.mode and 1 or 0.6, key == NP.mode and 0.82 or 0.6, key == NP.mode and 0 or 0.6) end
+    end
+end
+
+function NP.RefreshHeader(char, prof)
+    local h = NP.header
+    if not char then
+        h.char:SetText("No characters")
+        h.bar:Hide()
+        for _, b in ipairs(h.icons) do b:Hide() end
+        return
+    end
+    h.char:SetText(PB.ClassColored(char, PB.view.char))
+    for _, b in ipairs(h.icons) do b:Hide() end
+    for i, name in ipairs(PB.SortedKeys(char.professions)) do
+        local b = h.icons[i]
+        if b then
+            local p = char.professions[name]
+            b.name = name
+            b.icon:SetTexture(PB.ProfessionIcon(p))
+            b.icon:SetDesaturated(p.unloaded and true or false)
+            b.ring:SetShown(name == PB.view.prof)
+            b:Show()
+        end
+    end
+    h.bar:SetShown(prof ~= nil)
+    if prof then
+        h.bar:SetMinMaxValues(0, math.max(prof.max or 1, 1))
+        h.bar:SetValue(prof.skill or 0)
+        h.bar.text:SetText(string.format("%s %d/%d", PB.view.prof, prof.skill or 0, prof.max or 0))
+        if NP.portraitIcon then NP.portraitIcon:SetTexture(PB.ProfessionIcon(prof)) end
+    end
+    if NP.titleText then NP.titleText:SetText((PB.view.prof or "Windfall") .. " - " .. PB.DisplayName(PB.view.char)) end
+end
+
+function NP.DrawList()
+    local headerIndex, rowIndex = 0, 0
+    local y = 0
+    for _, b in ipairs(NP.headerPool) do b:Hide() end
+    for _, b in ipairs(NP.rowPool) do b:Hide() end
+    local room = NP.list:GetHeight() or 0
+    if room <= 0 then room = LIST_ROWS * ROW end
+    for i = NP.offset + 1, #NP.nodes do
+        local n = NP.nodes[i]
+        local height = n.header and 28 or ROW
+        if y + height > room then break end
+        local b
+        if n.header then
+            headerIndex = headerIndex + 1
+            b = NP.HeaderButton(headerIndex)
+            NP.SetHeader(b, n)
+        else
+            rowIndex = rowIndex + 1
+            b = NP.RowButton(rowIndex)
+            b.text:SetText(n.text or "")
+            b.selectedTex:SetShown(n.id ~= nil and n.id == NP.selected)
+        end
+        b.node = n
+        b:ClearAllPoints()
+        b:SetPoint("TOPLEFT", NP.list, "TOPLEFT", 0, -y)
+        b:SetPoint("RIGHT", NP.list, "RIGHT", 0, 0)
+        b:Show()
+        y = y + height
+    end
+end
+
+function NP.HeaderButton(i)
+    local b = NP.headerPool[i]
+    if b then return b end
+    b = NP.Make("Button", nil, NP.list, "ProfessionsRecipeListCategoryTemplate")
+    b:SetHeight(26)
+    local label = NP.Part(b, "Label") or NP.Part(b, "ButtonText")
+    b.label = label
+    if not label then
+        -- No native category art: a gold bar like it.
+        local bg = b:CreateTexture(nil, "BACKGROUND")
+        bg:SetAllPoints()
+        if not NP.Atlas(bg, "Professions-recipe-header") then bg:SetColorTexture(0.25, 0.18, 0.05, 0.9) end
+        b.label = b:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        b.label:SetPoint("LEFT", 8, 0)
+    end
+    if NP.Part(b, "RankBar") then b.RankBar:Hide() end
+    -- The template's own handlers expect the game's list data; plain ones here.
+    b:SetScript("OnEnter", nil)
+    b:SetScript("OnLeave", nil)
+    b:SetScript("OnClick", function(self)
+        local n = self.node
+        if n and n.header and NP.mode == "recipes" then
+            NP.collapsed[n.header] = not NP.collapsed[n.header]
+            NP.Refresh()
+        end
+    end)
+    NP.headerPool[i] = b
+    return b
+end
+
+function NP.SetHeader(b, n)
+    b.label:SetText(n.header .. (n.count and string.format("  |cffaaaaaa(%d)|r", n.count) or ""))
+    local icon = NP.Part(b, "CollapseIcon")
+    if icon then
+        local collapsed = NP.collapsed[n.header] and true or false
+        NP.Atlas(icon, collapsed and "Professions-recipe-header-expand" or "Professions-recipe-header-collapse")
+        local hover = NP.Part(b, "CollapseIconAlphaAdd")
+        if hover then NP.Atlas(hover, collapsed and "Professions-recipe-header-expand" or "Professions-recipe-header-collapse") end
+    end
+    if NP.Part(b, "RankBar") then b.RankBar:Hide() end
+end
+
+function NP.RowButton(i)
+    local b = NP.rowPool[i]
+    if b then return b end
+    b = CreateFrame("Button", nil, NP.list)
+    b:SetHeight(ROW)
+    b.text = b:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    b.text:SetPoint("LEFT", 22, 0)
+    b.text:SetPoint("RIGHT", -4, 0)
+    b.text:SetJustifyH("LEFT")
+    b.text:SetWordWrap(false)
+    b.selectedTex = b:CreateTexture(nil, "BACKGROUND")
+    b.selectedTex:SetAllPoints()
+    b.selectedTex:SetColorTexture(1, 0.82, 0, 0.18)
+    b:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
+    b:SetScript("OnClick", function(self)
+        if self.node and self.node.id then
+            NP.selected = self.node.id
+            NP.Refresh()
+        end
+    end)
+    NP.rowPool[i] = b
+    return b
+end
+
+function NP.DrawDetail(prof)
+    local d = NP.detail
+    local n = NP.selectedNode
+    if not (prof and n and n.recipe) then d:Hide() return end
+    d:Show()
+    local recipe = n.recipe
+    local crafts = NP.mode == "levelling" and n.crafts or 1
+    d.icon:SetTexture(recipe.item and ItemIcon(recipe.item)
+        or (C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(n.id)) or 134400)
+    d.name:SetText(recipe.name or "?")
+    local itemName = recipe.item and C_Item and C_Item.GetItemNameByID and C_Item.GetItemNameByID(recipe.item)
+    d.desc:SetText(NP.mode == "levelling" and string.format("Craft %d for this step of the route.", crafts)
+        or (itemName and ("Craft " .. (recipe.qty and recipe.qty ~= 1 and (recipe.qty .. " ") or "a ") .. itemName .. ".") or ""))
+    for i, tile in ipairs(d.tiles) do
+        local r = recipe.reagents and recipe.reagents[i]
+        if r then
+            local need = r[2] * crafts
+            local here, others = HaveCount(PB.view.char, r[1])
+            tile.icon:SetTexture(ItemIcon(r[1]))
+            tile.text:SetText(string.format("%s%d/%d|r %s", here >= need and "|cffffffff" or "|cff999999", here, need,
+                (C_Item and C_Item.GetItemNameByID and C_Item.GetItemNameByID(r[1])) or ("item " .. r[1])))
+            tile.alts:SetText(others > 0 and string.format("%d on other characters", others) or "")
+            tile.itemID = r[1]
+            tile:Show()
+        else
+            tile:Hide()
+        end
+    end
+    local cost, value, profit = CraftNumbers(recipe)
+    local chance = ns.SkillUps and ns.SkillUps[n.id] and SkillUpChance(n.id, nil, prof.skill or 0)
+    d.money:SetText(string.format("|cffffd100To Craft:|r %s\n|cffffd100Profit:|r %s\n|cffffd100Skill-up:|r %s",
+        Money(cost * crafts), profit and (profit < 0 and ("|cffff6060-" .. Money(-profit) .. "|r") or Money(profit)) or "?",
+        chance and (chance >= 1 and "every craft" or chance > 0 and string.format("%d%% a craft", math.floor(chance * 100 + 0.5))
+            or "none") or "-"))
+    local can = CanMake(PB.view.char, recipe)
+    local mine = NP.IsMine() and not prof.unloaded and prof.recipes[n.id] ~= nil
+    local count = math.min(can, crafts)
+    d.create:SetEnabled(mine and count > 0)
+    d.create:SetText(NP.mode == "levelling" and string.format("Create %d", count) or "Create")
+    d.createAll:SetEnabled(mine and can > 0)
+    d.createAll:SetText(string.format("Create All [%d]", can))
+    d.create.count, d.create.id = NP.mode == "levelling" and count or 1, n.id
+    d.createAll.count, d.createAll.id = can, n.id
+    d.note:SetText(not NP.IsMine() and ("Log in on " .. PB.DisplayName(PB.view.char) .. " to create this.")
+        or (not prof.recipes[n.id] and "Learn this recipe at the trainer first.") or "")
+end
+
+function NP.Build(book)
+    local page = CreateFrame("Frame", "WindfallProfessionPage", book)
+    page:Hide()
+    page:SetPoint("TOPLEFT", book, "TOPLEFT", 3, -24)
+    page:SetPoint("BOTTOMRIGHT", book, "BOTTOMRIGHT", -3, 3)
+    page:SetFrameStrata("HIGH")
+    page:EnableMouse(true)
+    page:EnableMouseWheel(true)
+    page:SetScript("OnMouseWheel", function(_, delta)
+        NP.offset = math.max(0, math.min(#(NP.nodes or {}) - LIST_ROWS, NP.offset - delta * 3))
+        NP.DrawList()
+    end)
+    local bg = page:CreateTexture(nil, "BACKGROUND")
+    bg:SetAllPoints()
+    bg:SetColorTexture(0.06, 0.05, 0.04, 1)
+    local art = page:CreateTexture(nil, "BACKGROUND", nil, 1)
+    art:SetAllPoints()
+    if not NP.Atlas(art, "Profession-Background-Overview") then art:Hide() end
+    NP.page = page
+    page.NP = NP
+
+    -- Title and portrait: the profession and character shown.
+    if NP.Part(book, "TitleContainer") then
+        local title = CreateFrame("Frame", nil, page)
+        title:SetAllPoints(book.TitleContainer)
+        NP.titleText = title:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        NP.titleText:SetPoint("CENTER", 0, 0)
+        local cover = title:CreateTexture(nil, "BACKGROUND")
+        cover:SetPoint("CENTER", NP.titleText, "CENTER")
+        cover:SetSize(260, 16)
+        cover:SetColorTexture(0.1, 0.08, 0.06, 1)
+    end
+    local container = NP.Part(book, "PortraitContainer")
+    if container and NP.Part(container, "portrait") then
+        local portrait = CreateFrame("Frame", nil, page)
+        portrait:SetAllPoints(container)
+        NP.portraitIcon = portrait:CreateTexture(nil, "OVERLAY")
+        NP.portraitIcon:SetAllPoints(container.portrait)
+        local mask = portrait:CreateMaskTexture(nil, "OVERLAY")
+        if mask then
+            mask:SetAllPoints(NP.Part(container, "CircleMask") or container.portrait)
+            mask:SetTexture("Interface\\CharacterFrame\\TempPortraitAlphaMask", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+            NP.portraitIcon:AddMaskTexture(mask)
+        end
+    end
+
+    -- Header: character, its professions, the skill bar, and the two views.
+    local h = CreateFrame("Frame", nil, page)
+    h:SetPoint("TOPLEFT", 16, -10)
+    h:SetPoint("TOPRIGHT", -16, -10)
+    h:SetHeight(28)
+    h.char = NP.Make("Button", nil, h, "UIPanelButtonTemplate")
+    h.char:SetSize(200, 22)
+    h.char:SetPoint("LEFT", 0, 0)
+    h.char:SetScript("OnClick", function(self) PB.ToggleCharMenu(self) end)
+    h.icons = {}
+    for i = 1, 6 do
+        local b = CreateFrame("Button", nil, h)
+        b:SetSize(26, 26)
+        b:SetPoint("LEFT", h.char, "RIGHT", 8 + (i - 1) * 30, 0)
+        b.icon = b:CreateTexture(nil, "ARTWORK")
+        b.icon:SetAllPoints()
+        b.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+        b.ring = b:CreateTexture(nil, "OVERLAY")
+        b.ring:SetPoint("TOPLEFT", -6, 6)
+        b.ring:SetPoint("BOTTOMRIGHT", 6, -6)
+        b.ring:SetTexture("Interface\\Buttons\\CheckButtonHilight")
+        b.ring:SetBlendMode("ADD")
+        b:SetScript("OnClick", function(self) PB.Choose(PB.view.char, self.name) end)
+        b:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+            GameTooltip:AddLine(self.name)
+            GameTooltip:Show()
+        end)
+        b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        h.icons[i] = b
+    end
+    NP.modeButtons = {}
+    local last
+    for _, m in ipairs({ { "levelling", "Levelling" }, { "recipes", "Recipes" } }) do
+        local b = NP.Make("Button", nil, h, "UIPanelButtonTemplate")
+        b:SetSize(90, 22)
+        if last then b:SetPoint("RIGHT", last, "LEFT", -4, 0) else b:SetPoint("RIGHT", 0, 0) end
+        b:SetText(m[2])
+        b:SetScript("OnClick", function()
+            NP.mode, NP.offset, NP.selected = m[1], 0, nil
+            NP.Refresh()
+        end)
+        NP.modeButtons[m[1]] = b
+        last = b
+    end
+    h.bar = CreateFrame("StatusBar", nil, h)
+    h.bar:SetSize(180, 16)
+    h.bar:SetPoint("RIGHT", last, "LEFT", -10, 0)
+    h.bar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
+    h.bar:SetStatusBarColor(0.25, 0.35, 0.85)
+    h.bar.bg = h.bar:CreateTexture(nil, "BACKGROUND")
+    h.bar.bg:SetAllPoints()
+    h.bar.bg:SetColorTexture(0, 0, 0, 0.6)
+    h.bar.text = h.bar:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    h.bar.text:SetPoint("CENTER")
+    NP.header = h
+
+    -- Left: search and the list.
+    NP.search = NP.Make("EditBox", "WindfallProfessionSearch", page, "SearchBoxTemplate")
+    NP.search:SetSize(300, 20)
+    NP.search:SetPoint("TOPLEFT", 26, -48)
+    NP.search:SetAutoFocus(false)
+    NP.search:HookScript("OnTextChanged", function() NP.offset = 0 NP.Refresh() end)
+    NP.list = CreateFrame("Frame", nil, page)
+    NP.list:SetPoint("TOPLEFT", 18, -76)
+    NP.list:SetPoint("BOTTOMLEFT", 18, 40)
+    NP.list:SetWidth(320)
+    NP.headerPool, NP.rowPool = {}, {}
+
+    -- Right: the recipe, like the game's own.
+    local d = CreateFrame("Frame", nil, page)
+    d:SetPoint("TOPLEFT", 362, -54)
+    d:SetPoint("BOTTOMRIGHT", -18, 40)
+    local frame = d:CreateTexture(nil, "BACKGROUND")
+    frame:SetAllPoints()
+    frame:SetColorTexture(0, 0, 0, 0.25)
+    d.icon = d:CreateTexture(nil, "ARTWORK")
+    d.icon:SetSize(52, 52)
+    d.icon:SetPoint("TOPLEFT", 22, -18)
+    local mask = d:CreateMaskTexture(nil, "ARTWORK")
+    if mask then
+        mask:SetAllPoints(d.icon)
+        mask:SetTexture("Interface\\CharacterFrame\\TempPortraitAlphaMask", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+        d.icon:AddMaskTexture(mask)
+    end
+    d.name = d:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
+    d.name:SetPoint("LEFT", d.icon, "RIGHT", 14, 4)
+    d.name:SetPoint("RIGHT", d, "RIGHT", -12, 0)
+    d.name:SetJustifyH("LEFT")
+    d.desc = d:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    d.desc:SetPoint("TOPLEFT", d.icon, "BOTTOMLEFT", 0, -16)
+    d.desc:SetPoint("RIGHT", d, "RIGHT", -12, 0)
+    d.desc:SetJustifyH("LEFT")
+    d.reagentHead = d:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    d.reagentHead:SetPoint("TOPLEFT", d.desc, "BOTTOMLEFT", 0, -22)
+    d.reagentHead:SetText("Reagents:")
+    d.tiles = {}
+    for i = 1, 8 do
+        local t = CreateFrame("Button", nil, d)
+        t:SetSize(38, 38)
+        t:SetPoint("TOPLEFT", d.reagentHead, "BOTTOMLEFT", 0, -8 - (i - 1) * 44)
+        t.icon = t:CreateTexture(nil, "ARTWORK")
+        t.icon:SetAllPoints()
+        t.border = t:CreateTexture(nil, "OVERLAY")
+        t.border:SetPoint("TOPLEFT")
+        t.border:SetPoint("BOTTOMRIGHT", 1, -1)
+        if not NP.Atlas(t.border, "Professions-Slot-Frame") then t.border:SetTexture("Interface\\Buttons\\UI-Quickslot2") end
+        t.text = t:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        t.text:SetPoint("TOPLEFT", t, "TOPRIGHT", 8, -4)
+        t.text:SetWidth(200)
+        t.text:SetJustifyH("LEFT")
+        t.alts = t:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        t.alts:SetPoint("TOPLEFT", t.text, "BOTTOMLEFT", 0, -2)
+        t:SetScript("OnEnter", function(self)
+            if self.itemID then
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:SetItemByID(self.itemID)
+                GameTooltip:Show()
+            end
+        end)
+        t:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        d.tiles[i] = t
+    end
+    d.money = d:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    d.money:SetPoint("BOTTOMLEFT", 22, 40)
+    d.money:SetJustifyH("LEFT")
+    d.money:SetSpacing(3)
+    d.create = NP.Make("Button", nil, d, "UIPanelButtonTemplate")
+    d.create:SetSize(110, 22)
+    d.create:SetPoint("BOTTOMRIGHT", -10, 10)
+    d.create:SetScript("OnClick", function(self) NP.Craft(self.id, self.count) end)
+    d.createAll = NP.Make("Button", nil, d, "UIPanelButtonTemplate")
+    d.createAll:SetSize(120, 22)
+    d.createAll:SetPoint("BOTTOMLEFT", 10, 10)
+    d.createAll:SetScript("OnClick", function(self) NP.Craft(self.id, self.count) end)
+    d.note = d:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    d.note:SetPoint("BOTTOM", 0, 16)
+    NP.detail = d
+
+    -- Below the list: the shopping list, in the Windfall window.
+    local shop = NP.Make("Button", nil, page, "UIPanelButtonTemplate")
+    shop:SetSize(160, 22)
+    shop:SetPoint("BOTTOMLEFT", 18, 10)
+    shop:SetText("Shopping list")
+    shop:SetScript("OnClick", function() if PageOpeners.route then PageOpeners.route() end end)
+    shop:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Shopping list")
+        GameTooltip:AddLine("All materials for the route, with Show at the auction house and Buy at vendors.", 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    shop:SetScript("OnLeave", function() GameTooltip:Hide() end)
+end
+
+-- The side tab, under the game's profession tabs.
+function NP.Attach()
+    local book = _G.ProfessionsFrame
+    if NP.attached or not book then return end
+    NP.attached = true
+    NP.Build(book)
+    local tab = NP.Make("Frame", "WindfallProfessionTab", book, "LargeSideTabButtonTemplate")
+    if not NP.Part(tab, "Icon") then
+        tab = CreateFrame("Button", "WindfallProfessionTabButton", book)
+        tab:SetSize(44, 44)
+        tab.Icon = tab:CreateTexture(nil, "ARTWORK")
+        tab.Icon:SetAllPoints()
+    end
+    tab.Icon:SetTexture("Interface\\AddOns\\Windfall\\Media\\icon")
+    tab.tooltipText = "Windfall: your characters' professions"
+    tab:EnableMouse(true)
+    NP.tab = tab
+
+    function NP.Place()
+        tab:ClearAllPoints()
+        local wt = _G.WhatsTrainingCraftingTab
+        if wt and wt:IsShown() then
+            tab:SetPoint("BOTTOMLEFT", wt, "TOPLEFT", 0, 10)
+        else
+            tab:SetPoint("BOTTOMLEFT", book, "BOTTOMRIGHT", 0, 10)
+        end
+    end
+
+    function NP.SetActive(active)
+        NP.active = active
+        if tab.SetChecked then pcall(tab.SetChecked, tab, active) end
+        NP.page:SetShown(active)
+        if not active then return end
+        -- Opens on the profession the window shows, for the character you are on.
+        local T = C_TradeSkillUI
+        local base = T and T.IsTradeSkillReady and T.IsTradeSkillReady() and T.GetBaseProfessionInfo and T.GetBaseProfessionInfo()
+        local line = base and SkillLineOf(base)
+        local me = line and db.chars and db.chars[PB.CharacterKey()]
+        for name, p in pairs(me and me.professions or {}) do
+            if p.line == line then PB.Choose(PB.CharacterKey(), name) return end
+        end
+        NP.Refresh()
+    end
+
+    local function Clicked(_, button, upInside)
+        if upInside == false or (button and button ~= "LeftButton") then return end
+        NP.SetActive(not NP.active)
+    end
+    if type(tab.SetCustomOnMouseUpHandler) == "function" and NP.Part(tab, "Icon") and tab:GetName() == "WindfallProfessionTab" then
+        tab:SetCustomOnMouseUpHandler(Clicked)
+    else
+        tab:SetScript("OnMouseUp", function(self, button) Clicked(self, button, true) end)
+    end
+    tab:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:AddLine("Windfall")
+        GameTooltip:AddLine("Any of your characters' professions: recipes, materials and the levelling route.", 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    tab:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    -- The game's own tabs go back to its view.
+    local natives = { NP.Part(book, "ProfessionsOverviewTab") }
+    for _, t in ipairs(NP.Part(book, "rightProfessionTabs") or {}) do natives[#natives + 1] = t end
+    for _, t in ipairs(natives) do
+        if t and t.HookScript then t:HookScript("OnMouseUp", function() NP.SetActive(false) end) end
+    end
+    book:HookScript("OnShow", function()
+        C_Timer.After(0, NP.Place)
+        tab:Show()
+        -- Opened on the character you are on, at the profession just opened.
+        if not NP.active then return end
+        NP.Refresh()
+    end)
+    book:HookScript("OnHide", function() NP.SetActive(false) end)
+    NP.Place()
+    tab:Show()
+    PB.onChoose = function() if NP.active then NP.Refresh() end end
+end
+
+local watcher = CreateFrame("Frame")
+watcher:RegisterEvent("ADDON_LOADED")
+watcher:RegisterEvent("PLAYER_LOGIN")
+watcher:RegisterEvent("BAG_UPDATE_DELAYED")
+pcall(watcher.RegisterEvent, watcher, "TRADE_SKILL_LIST_UPDATE")
+pcall(watcher.RegisterEvent, watcher, "NEW_RECIPE_LEARNED")
+watcher:SetScript("OnEvent", function(_, event, name)
+    if event == "ADDON_LOADED" and name == "Blizzard_Professions" or event == "PLAYER_LOGIN" then
+        if _G.ProfessionsFrame then NP.Attach() end
+    elseif NP.active then
+        -- Bags, skill and recipes change while you craft.
+        if not NP.pending then
+            NP.pending = true
+            C_Timer.After(0.6, function() NP.pending = false NP.Refresh() end)
+        end
+    end
+end)
 end
 
 local FISH_OPTIONS = {

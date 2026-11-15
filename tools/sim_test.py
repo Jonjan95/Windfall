@@ -673,6 +673,36 @@ print(rt.eval(r'''(function()
   local S = WindfallShoppingFrame
   out[#out+1] = "zivv: Levelling -> "..tostring(S.title2.text).." | now: "..tostring(S.now.text)
   for i = 1, 3 do local t = rawget(S.lines[i], "text"); if t and t ~= "" then out[#out+1] = "      "..t end end
+  -- the game's profession window: Windfall's side tab and page
+  local book = CreateFrame("Frame", "ProfessionsFrame")
+  local native = CreateFrame("Button"); book.rightProfessionTabs = { native }
+  for _, h in ipairs(handlers) do h(nil, "ADDON_LOADED", "Blizzard_Professions") end
+  local tab = WindfallProfessionTabButton
+  local page = WindfallProfessionPage
+  page:Hide()
+  out[#out+1] = "profwin: tab made -> "..tostring(tab ~= nil).." page hidden -> "..tostring(not page:IsShown())
+  tab.onOnMouseUp(tab, "LeftButton")
+  local NP = page.NP
+  local function rows() local t = {} for _, b in ipairs(NP.headerPool) do if b:IsShown() then t[#t+1] = "["..tostring(b.label.text).."]" end end
+    for _, b in ipairs(NP.rowPool) do if b:IsShown() then t[#t+1] = tostring(b.text.text) end end return table.concat(t, " | ") end
+  out[#out+1] = "profwin: open -> shown="..tostring(page:IsShown()).." char="..tostring(NP.header.char.text).." bar="..tostring(NP.header.bar.text.text)
+  out[#out+1] = "      list: "..rows()
+  local d = NP.detail
+  out[#out+1] = "      detail: "..tostring(d.name.text).." | "..tostring(d.tiles[1].text.text).." | "..tostring(d.tiles[1].alts.text).." | create enabled="..tostring(d.create.enabled).." note="..tostring(d.note.text)
+  out[#out+1] = "      money: "..tostring(d.money.text):gsub("\n", " / ")
+  NP.search.text = "elixir"; NP.search.onOnTextChanged(NP.search)
+  out[#out+1] = "profwin: search 'elixir' -> "..rows()
+  NP.search.text = ""; NP.search.onOnTextChanged(NP.search)
+  NP.modeButtons.levelling.onOnClick(NP.modeButtons.levelling)
+  out[#out+1] = "profwin: levelling -> "..rows()
+  NP.modeButtons.recipes.onOnClick(NP.modeButtons.recipes)
+  -- pick Zivv Zniper (this character) from the page's character button
+  NP.header.char.onOnClick(NP.header.char)
+  for _, r in ipairs(WindfallCharMenu.rows) do if r:IsShown() and r.key == "Huntie-Realm" then r.onOnClick(r) end end
+  out[#out+1] = "profwin: picked Huntie -> char="..tostring(NP.header.char.text).." bar="..tostring(NP.header.bar.text.text)
+  out[#out+1] = "      list: "..rows()
+  native.onOnMouseUp(native, "LeftButton")
+  out[#out+1] = "profwin: native tab -> page shown="..tostring(page:IsShown())
   GetProfessionInfo = oldGPI3; playerSurname = nil; player = "Huntie"; class = "HUNTER"; containers = {}
   return table.concat(out, "\n")
 end)()''').replace("|cffffd700g|r","g").replace("|cffc7c7cfs|r","s").replace("|cffeda55fc|r","c"))

@@ -2,6 +2,16 @@
 
 All changes to Windfall, newest first. After an update, type `/reload` in game (or restart the game when the notes say so).
 
+## [0.2.39] - 2026-11-15
+
+- **Windfall inside the game's profession window.** A Windfall tab now sits with the profession tabs on the right side of the profession window. Click it and the window shows Windfall's page in the window's own layout:
+  - the recipe list grouped into the game's categories, with search and how many you can make
+  - the picked recipe with its reagents (what you have and need, and what your other characters hold), cost, profit and skill-up chance, plus Create and Create All
+  - at the top, a character button (full names) and that character's profession icons with the skill bar, so you can switch between any character's professions without leaving the window
+  - **Recipes** and **Levelling** views; Levelling lists the route step by step
+- It opens on the profession you were looking at; click any of the game's profession tabs to go back. Create works for the character you are on; other characters' recipes are for looking. *Shopping list* opens the Windfall window's Levelling tab with the Show and Buy buttons.
+- Recipes now remember their category from the profession window (open each profession once to fill it in).
+
 ## [0.2.38] - 2026-11-15
 
 - **Full character names.** Forever characters have a surname, and Windfall now uses the whole name ("Zivv Gg", "Zivv Zniper") everywhere. Characters with the same first name used to share one save; now each has its own. An old save under just the first name goes to the first character of that name to log in, if its professions match.
