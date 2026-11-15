@@ -2,6 +2,17 @@
 
 All changes to Windfall, newest first. After an update, type `/reload` in game (or restart the game when the notes say so).
 
+## [0.2.42] - 2026-11-15
+
+- **One Fishing, one Farming.** The header now holds your crafting professions, then **Fishing**, then **Farming**, the same on every character:
+  - **Farming** has **Session** and **Zones**. Session shows gold per hour, the clock, the total, your gathering skills, what you have looted, and switches for herb, ore and fishing pool sparkles.
+  - **Fishing** has only fishing: the fishing key and its options, how many fish get away where you are, and the fishing pool sparkle. If the character has Camping recipes (Fish Bowl), a **Recipes** tab shows them.
+  - Herbalism, Mining and Skinning no longer each open a copy of the same session; their skills are on Farming's Session page.
+- **Opens on the character you are playing**, every time the window opens. Picking another character still works until you close it.
+- The title and the round portrait now show Windfall's profession instead of the game's own.
+- Fishing no longer shows up twice (once as a question mark).
+- Tooltips in the header open below it instead of over the title.
+
 ## [0.2.41] - 2026-11-15
 
 - **Everything Windfall does is now in the game's profession window.** The Windfall tab's header shows every profession of the character you pick, and the tabs under the window change with it:

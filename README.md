@@ -7,8 +7,8 @@ A World of Warcraft Forever addon for making and spending gold well: what your f
 ## Getting around
 
 - **Windfall lives in the game's profession window**, as a tab with the profession tabs on its right side. The Windfall icon on the bar, the key binding and `/wf` open the window on it.
-- **At the top** pick any of your characters and one of their professions (the icons: crafting, gathering and Fishing); a skill bar shows where that profession is. The gear holds the general settings.
-- **Tabs under the window** change with the profession: **Recipes** and **Levelling** for crafting; **Session** and **Zones** for Herbalism, Mining and Skinning (and **Farming** on a character that gathers nothing); Fishing adds a **Fishing** tab for the fishing key.
+- **At the top** pick any of your characters (it opens on the one you are playing) and one of the icons: their crafting professions, **Fishing** and **Farming**. A skill bar shows where that profession is. The gear holds the general settings.
+- **Tabs under the window** change with the icon: **Recipes** and **Levelling** for crafting; **Session** and **Zones** for Farming; **Fishing** (and **Recipes** for Camping) for Fishing.
 - **The bar** stays on screen: your gold per hour and session time (click for the Session page), a fish switch (fishing key on or off, right-click to choose the key), a flower switch (node sparkles on or off), and the Windfall icon. Drag it wherever you like.
 - **The shopping list** docks next to the auction house or a vendor when there is something on it to buy there; *Shopping list* on the Levelling page opens it beside the profession window.
 
@@ -37,7 +37,7 @@ Trainer recipe data comes from **What's Training?** by Sveng (MIT licence) and s
 
 ## Node sparkles
 
-Switched on from the bar, the gear or a gathering profession's Session page, the nearest herb, ore vein or fishing pool you can gather gets a sparkle and the game's gather icon. Quest objects, chests and NPCs get nothing. Each kind can be switched off on its own. The game only picks up nodes within about 15 yards.
+Switched on from the bar, the gear or Farming's Session page, the nearest herb, ore vein or fishing pool you can gather gets a sparkle and the game's gather icon. Quest objects, chests and NPCs get nothing. Each kind can be switched off on its own. The game only picks up nodes within about 15 yards.
 
 When Windfall is done with the interact key (the line comes in, or sparkles are switched off), it puts it back to the game's defaults: 10 yards, in front of you. The rest of the time it leaves the interact settings alone, so other addons can set them as they like.
 

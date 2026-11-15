@@ -3246,6 +3246,8 @@ local PROFESSION_ICONS = {
     [171] = "Interface\\Icons\\Trade_Alchemy", [164] = "Interface\\Icons\\Trade_BlackSmithing",
     [333] = "Interface\\Icons\\Trade_Engraving", [202] = "Interface\\Icons\\Trade_Engineering",
     [185] = "Interface\\Icons\\INV_Misc_Food_15", [129] = "Interface\\Icons\\Spell_Holy_SealOfSacrifice",
+    [356] = "Interface\\Icons\\Trade_Fishing", [186] = "Interface\\Icons\\Trade_Mining",
+    [182] = "Interface\\Icons\\Trade_Herbalism", [393] = "Interface\\Icons\\INV_Misc_Pelt_Wolf_01",
 }
 local MAX_PROF_ICONS = 6
 local header, headerPanel, charMenu
@@ -4330,23 +4332,21 @@ local NP = { mode = "recipes", offset = 0, collapsed = {}, tried = {}, covered =
 local ROW = 20
 local HEADER = 24
 local LIST_W = 296
-local SESSION_ROWS = 15
+local SESSION_ROWS = 14
 local ZONE_ROWS = 18
 local FISHING_LINE = 356
 local TABS_FOR = {
     craft = { { key = "recipes", label = "Recipes" }, { key = "levelling", label = "Levelling" } },
-    gather = { { key = "session", label = "Session" }, { key = "zones", label = "Zones" } },
-    fish = { { key = "session", label = "Session" }, { key = "zones", label = "Zones" }, { key = "fishing", label = "Fishing" } },
+    farm = { { key = "session", label = "Session" }, { key = "zones", label = "Zones" } },
+    fish = { { key = "fishing", label = "Fishing" } },
+    fishCraft = { { key = "fishing", label = "Fishing" }, { key = "recipes", label = "Recipes" } },
 }
-local GATHER_ICONS = {
-    [182] = "Interface\\Icons\\Trade_Herbalism", [186] = "Interface\\Icons\\Trade_Mining",
-    [393] = "Interface\\Icons\\INV_Misc_Pelt_Wolf_01", [356] = "Interface\\Icons\\Trade_Fishing",
-}
--- A character without gathering professions still farms loot: its header
--- gets this in their place.
+-- Farming: gold per hour, the zone history and node sparkles, for every character.
 local FARMING = "Farming"
-local FARMING_ENTRY = { line = 0, icon = "Interface\\Icons\\INV_Misc_Bag_10" }
-local SPARKLE_FOR = { [182] = { "sparkleHerb", "herbs" }, [186] = { "sparkleOre", "ore" }, [356] = { "sparkleFish", "fishing pools" } }
+local FARMING_ICON = "Interface\\Icons\\INV_Misc_Bag_10"
+local FISHING_ICON = "Interface\\Icons\\Trade_Fishing"
+local GATHER_ORDER = { 182, 186, 393, 356 }
+local SPARKLES = { { "sparkleHerb", "Herbs" }, { "sparkleOre", "Ore" }, { "sparkleFish", "Fishing pools" } }
 -- Professions with a crafting window, to open the window with.
 local CRAFT_LINES = { [171] = true, [164] = true, [333] = true, [202] = true, [165] = true, [197] = true, [185] = true, [129] = true }
 
@@ -4370,9 +4370,9 @@ function NP.Atlas(texture, atlas)
     return (pcall(texture.SetAtlas, texture, atlas))
 end
 
-function NP.Tooltip(owner, title, text)
+function NP.Tooltip(owner, title, text, anchor)
     owner:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetOwner(self, anchor or "ANCHOR_RIGHT")
         GameTooltip:AddLine(title)
         if text then GameTooltip:AddLine(text, 1, 1, 1, true) end
         GameTooltip:Show()
@@ -4380,7 +4380,6 @@ function NP.Tooltip(owner, title, text)
     owner:SetScript("OnLeave", function() GameTooltip:Hide() end)
 end
 
--- A framed box, like the game's insets.
 function NP.Box(parent)
     local box = NP.Make("Frame", nil, parent, "BackdropTemplate")
     if box.SetBackdrop then
@@ -4446,23 +4445,51 @@ function NP.IsMine()
 end
 
 -- The gathering profession shown, when one is.
-function NP.Gathering()
-    if NP.gather == FARMING then return FARMING_ENTRY end
-    local char = (db.chars or {})[PB.view.char]
-    return NP.gather and char and char.gathering and char.gathering[NP.gather]
+-- A character's Fishing: its name, its skill (saved with the gathering
+-- professions, else its crafting entry) and that crafting entry, which holds
+-- the Camping recipes once the window was read.
+function NP.FishingOf(char)
+    if not char then return nil end
+    local name, skill, craft
+    for n, g in pairs(char.gathering or {}) do
+        if g.line == FISHING_LINE then name, skill = n, g end
+    end
+    for n, p in pairs(char.professions or {}) do
+        if p.line == FISHING_LINE then
+            craft = p
+            name, skill = name or n, skill or p
+        end
+    end
+    return name, skill, craft
 end
 
--- A character's gathering professions, or Farming when it has none.
-function NP.GatheringOf(char)
-    local gathering = char and char.gathering or {}
-    if next(gathering) then return gathering end
-    return { [FARMING] = FARMING_ENTRY }
+-- The tabs under the window for what is shown.
+function NP.Tabs(char)
+    if NP.special == "fish" then
+        local _, _, craft = NP.FishingOf(char)
+        return (craft and next(craft.recipes or {})) and TABS_FOR.fishCraft or TABS_FOR.fish
+    end
+    return TABS_FOR[NP.Kind()]
 end
 
+function NP.Crafting()
+    return NP.mode == "recipes" or NP.mode == "levelling"
+end
+
+-- The character you are on, as the window opens.
+function NP.Home()
+    local me = PB.CharacterKey()
+    local char = db.chars and db.chars[me]
+    if not char then return end
+    local view = PB.view
+    view.char, view.offset, view.target, view.chosen = me, 0, nil, nil
+    if not char.professions[view.prof or ""] then view.prof = PB.SortedKeys(char.professions)[1] end
+    if NP.special == "fish" and not NP.FishingOf(char) then NP.special = nil end
+end
+
+-- "fish", "farm", or "craft" for a crafting profession.
 function NP.Kind()
-    local g = NP.Gathering()
-    if not g then return "craft" end
-    return g.line == FISHING_LINE and "fish" or "gather"
+    return NP.special or "craft"
 end
 
 function NP.ProfessionOpen(line)
@@ -4593,16 +4620,24 @@ function NP.Uncover()
     end
 end
 
--- Keeps the picked profession valid for the character shown: a gathering one
--- it has, or its crafting one, or its first gathering one when it crafts nothing.
+-- Keeps the page valid for the character shown: Fishing only when it fishes,
+-- Farming when it crafts nothing, and a tab that belongs to what is shown.
 function NP.Settle(char, prof)
-    if not char then NP.gather = nil return end
-    local gathering = NP.GatheringOf(char)
-    if NP.gather and not gathering[NP.gather] then NP.gather = nil end
-    if not prof and not NP.gather then NP.gather = PB.SortedKeys(gathering)[1] end
-    local g = NP.Gathering()
-    NP.line = g and g.line
-    local tabs = TABS_FOR[NP.Kind()]
+    if not char then NP.special = nil return end
+    if NP.special == "fish" and not NP.FishingOf(char) then NP.special = nil end
+    if not NP.special then
+        if prof and prof.line == FISHING_LINE then
+            NP.special = "fish"
+        elseif not prof then
+            NP.special = "farm"
+        end
+    end
+    -- Fishing's Camping recipes are its crafting entry.
+    if NP.special == "fish" then
+        local name, _, craft = NP.FishingOf(char)
+        if craft then PB.view.prof = name end
+    end
+    local tabs = NP.Tabs(char)
     for _, m in ipairs(tabs) do
         if m.key == NP.mode then return end
     end
@@ -4616,11 +4651,11 @@ function NP.Refresh()
     if NP.IsMine() and NoteCharacter then NoteCharacter() end -- skills as the game has them now
     local char, prof = NP.Selection()
     NP.Settle(char, prof)
-    local kind = NP.Kind()
+    char, prof = NP.Selection()
     NP.RefreshHeader(char, prof)
-    NP.RefreshTabs(kind)
+    NP.RefreshTabs(NP.Tabs(char))
     NP.RefreshChecks()
-    local crafting = kind == "craft"
+    local crafting = NP.Crafting()
     NP.search:SetShown(crafting)
     NP.listBox:SetShown(crafting)
     NP.detail:SetShown(crafting)
@@ -4656,8 +4691,7 @@ function NP.Refresh()
 end
 
 -- The tabs under the window, for the kind of profession shown.
-function NP.RefreshTabs(kind)
-    local tabs = TABS_FOR[kind]
+function NP.RefreshTabs(tabs)
     for i, b in ipairs(NP.modeTabs) do
         local m = tabs[i]
         if m then
@@ -4694,31 +4728,39 @@ function NP.RefreshHeader(char, prof)
     local fs = h.char:GetFontString()
     local color = char.class and RAID_CLASS_COLORS and RAID_CLASS_COLORS[char.class]
     if fs and color then fs:SetTextColor(color.r, color.g, color.b) end
-    -- crafting professions first, then gathering and fishing
+    -- crafting professions, then Fishing, then Farming
     local entries = {}
     for _, name in ipairs(PB.SortedKeys(char.professions)) do
         local p = char.professions[name]
-        entries[#entries + 1] = { name = name, p = p, icon = PB.ProfessionIcon(p), selected = not NP.gather and name == PB.view.prof }
+        if p.line ~= FISHING_LINE then
+            entries[#entries + 1] = { name = name, p = p, icon = PB.ProfessionIcon(p), selected = not NP.special and name == PB.view.prof }
+        end
     end
-    local gathering = NP.GatheringOf(char)
-    for _, name in ipairs(PB.SortedKeys(gathering)) do
-        local g = gathering[name]
-        entries[#entries + 1] = { name = name, p = g, gather = true, icon = g.icon or GATHER_ICONS[g.line], selected = name == NP.gather }
+    local fishName, fishSkill = NP.FishingOf(char)
+    if fishName then
+        entries[#entries + 1] = { name = fishName, p = fishSkill, special = "fish", icon = FISHING_ICON, selected = NP.special == "fish" }
     end
+    entries[#entries + 1] = { name = FARMING, special = "farm", icon = FARMING_ICON, selected = NP.special == "farm" }
     local last = h.char
     for i, e in ipairs(entries) do
         local b = h.icons[i]
         if b then
-            b.name, b.prof, b.gather = e.name, e.p, e.gather
+            b.name, b.prof, b.special = e.name, e.p or false, e.special or false
             b.icon:SetTexture(e.icon or "Interface\\Icons\\INV_Misc_QuestionMark")
-            b.icon:SetDesaturated(e.p.unloaded and true or false)
+            b.icon:SetDesaturated(e.p and e.p.unloaded and not e.special and true or false)
             b.ring:SetShown(e.selected)
             b:Show()
             last = b
         end
     end
-    local shown = NP.Gathering() or prof
-    local shownName = NP.gather or PB.view.prof
+    local shown, shownName, icon
+    if NP.special == "fish" then
+        shown, shownName, icon = fishSkill, fishName, FISHING_ICON
+    elseif NP.special == "farm" then
+        shownName, icon = FARMING, FARMING_ICON
+    else
+        shown, shownName, icon = prof, PB.view.prof, prof and PB.ProfessionIcon(prof)
+    end
     h.barFrame:ClearAllPoints()
     h.barFrame:SetPoint("LEFT", last, "RIGHT", 14, 0)
     h.barFrame:SetPoint("RIGHT", h.gear, "LEFT", -8, 0)
@@ -4728,9 +4770,7 @@ function NP.RefreshHeader(char, prof)
         h.bar:SetValue(shown.skill or 0)
         h.bar.text:SetText(string.format("%s  %d / %d", shownName, shown.skill or 0, shown.max or 0))
     end
-    if shown and NP.portraitIcon then
-        NP.portraitIcon:SetTexture(NP.gather and (shown.icon or GATHER_ICONS[shown.line]) or PB.ProfessionIcon(shown))
-    end
+    if icon and NP.portraitIcon then NP.portraitIcon:SetTexture(icon) end
     if NP.titleText then NP.titleText:SetText((shownName or "Windfall") .. " - " .. PB.DisplayName(PB.view.char)) end
 end
 
@@ -4792,7 +4832,7 @@ function NP.DrawList()
 end
 
 function NP.Scroll(delta)
-    if NP.Kind() ~= "craft" then return end
+    if not NP.Crafting() then return end
     NP.offset = math.max(0, math.min(NP.maxOffset or 0, NP.offset - delta * 3))
     NP.DrawList()
 end
@@ -4946,6 +4986,8 @@ function NP.BuildSession(parent)
     s.total:SetPoint("TOPRIGHT", -16, -18)
     s.where = s:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     s.where:SetPoint("TOPRIGHT", s.total, "BOTTOMRIGHT", 0, -6)
+    s.skills = s:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    s.skills:SetPoint("TOPLEFT", s.time, "TOPRIGHT", 24, 0)
     local line = s:CreateTexture(nil, "ARTWORK")
     line:SetPoint("TOPLEFT", 12, -68)
     line:SetPoint("TOPRIGHT", -12, -68)
@@ -4993,8 +5035,6 @@ function NP.BuildSession(parent)
     s.hint:SetPoint("LEFT", 16, 0)
     s.hint:SetPoint("RIGHT", -16, 0)
     s.hint:SetJustifyH("LEFT")
-    s.getaway = s:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    s.getaway:SetPoint("BOTTOMLEFT", 16, 44)
     s.toggle = NP.Button(s, "Start", 80)
     s.toggle:SetPoint("BOTTOMLEFT", 10, 10)
     s.toggle:SetScript("OnClick", function()
@@ -5009,37 +5049,48 @@ function NP.BuildSession(parent)
     s.reset:SetPoint("LEFT", s.view, "RIGHT", 6, 0)
     s.reset:SetScript("OnClick", function() Reset(IsShiftKeyDown and IsShiftKeyDown()) end)
     NP.Tooltip(s.reset, "Reset", "Saves this session to the zone history and starts a new one. Shift-click: throw it away instead.")
-    s.sparkle = NP.Check(s, { label = "Sparkle",
-        get = function()
-            local row = SPARKLE_FOR[NP.line]
-            return db.sparkle and row and db[row[1]] ~= false
-        end,
-        set = function(value)
-            local row = SPARKLE_FOR[NP.line]
-            if not row then return end
-            db[row[1]] = value
-            if value and not db.sparkle then
-                db.sparkle = true
-                ApplySparkles()
-            end
-            SparkleRecheck()
-            if UpdateBarIcons then UpdateBarIcons() end
-        end,
-        tip = "The nearest node close by gets a sparkle and the game's gather icon. The game only picks up nodes within about 15 yards." })
-    s.sparkle:SetPoint("BOTTOMRIGHT", -150, 9)
+    -- Node sparkles, each kind on its own.
+    local y = 10
+    for i = #SPARKLES, 1, -1 do
+        local key, label = SPARKLES[i][1], SPARKLES[i][2]
+        local c = NP.Check(s, { label = label,
+            get = function() return db.sparkle and db[key] ~= false end,
+            set = function(value)
+                db[key] = value
+                if value and not db.sparkle then
+                    db.sparkle = true
+                    ApplySparkles()
+                end
+                SparkleRecheck()
+                if UpdateBarIcons then UpdateBarIcons() end
+            end,
+            tip = "The nearest one close by that you can gather gets a sparkle and the game's gather icon. The game only picks up nodes within about 15 yards." })
+        c:SetPoint("BOTTOMLEFT", s, "BOTTOMRIGHT", -150, y)
+        y = y + 24
+    end
+    local head = s:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    head:SetPoint("BOTTOMLEFT", s, "BOTTOMRIGHT", -146, y + 2)
+    head:SetText("Node sparkles")
     NP.session = s
 end
 
 function NP.DrawSession()
     local s = NP.session
-    local g = NP.Gathering()
-    NP.line = g and g.line
     local list, total, unpriced = ns.SessionList(SESSION_ROWS)
     local elapsed = db.elapsed or 0
     s.rate:SetText(elapsed >= 30 and (Money(total / elapsed * 3600) .. " |cffaaaaaa/ hour|r") or "|cffaaaaaa-- / hour|r")
     s.time:SetText(MODE_LABEL[db.mode] .. "  " .. Clock(elapsed) .. (running and "" or "  |cffff8040paused|r"))
     s.total:SetText("Total " .. Money(total))
     s.where:SetText(ZoneName())
+    -- the gathering skills of the character shown
+    local char = (db.chars or {})[PB.view.char]
+    local parts = {}
+    for _, line in ipairs(GATHER_ORDER) do
+        for name, g in pairs(char and char.gathering or {}) do
+            if g.line == line then parts[#parts + 1] = string.format("|cffffd100%s|r %d/%d", name, g.skill or 0, g.max or 0) end
+        end
+    end
+    s.skills:SetText(table.concat(parts, "   "))
     for i, r in ipairs(s.rows) do
         local e = list[i]
         if e then
@@ -5063,18 +5114,12 @@ function NP.DrawSession()
     end
     s.hint:ClearAllPoints()
     s.hint:SetPoint("TOPLEFT", 16, -96 - #list * ROW)
-    s.hint:SetPoint("RIGHT", -16, 0)
+    s.hint:SetPoint("RIGHT", -170, 0)
     s.hint:SetText(hint or "")
-    s.getaway:SetText(NP.Kind() == "fish" and GetawayText() or "")
     s.toggle:SetText(running and "Pause" or "Start")
     s.view:SetText(MODE_LABEL[db.mode])
-    local sparkle = SPARKLE_FOR[NP.line]
-    s.sparkle:SetShown(sparkle ~= nil)
-    s.sparkle.label:SetShown(sparkle ~= nil)
-    if sparkle then s.sparkle.label:SetText("Sparkle on " .. sparkle[2]) end
 end
 
--- Zones: gold per hour by zone, best first, for the view that counts.
 function NP.BuildZones(parent)
     local z = NP.Box(parent)
     z:SetAllPoints()
@@ -5185,6 +5230,19 @@ function NP.BuildFishing(parent)
     f.getaway:SetPoint("TOPLEFT", 16, y - 22)
     f.getaway:SetPoint("RIGHT", -16, 0)
     f.getaway:SetJustifyH("LEFT")
+    local pools = NP.Check(f, { label = "Sparkle on the nearest fishing pool",
+        get = function() return db.sparkle and db.sparkleFish ~= false end,
+        set = function(value)
+            db.sparkleFish = value
+            if value and not db.sparkle then
+                db.sparkle = true
+                ApplySparkles()
+            end
+            SparkleRecheck()
+            if UpdateBarIcons then UpdateBarIcons() end
+        end,
+        tip = "The nearest fishing pool close by gets a sparkle. The game only picks up pools within about 15 yards." })
+    pools:SetPoint("TOPLEFT", 14, y - 48)
     NP.fishing = f
 end
 
@@ -5199,7 +5257,7 @@ function NP.BuildGear(h)
     gear:SetPoint("RIGHT", 0, 0)
     gear:SetNormalTexture("Interface\\Buttons\\UI-OptionsButton")
     gear:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight", "ADD")
-    NP.Tooltip(gear, "Windfall settings")
+    NP.Tooltip(gear, "Windfall settings", nil, "ANCHOR_BOTTOM")
     local menu = NP.Make("Frame", nil, NP.page, "BackdropTemplate")
     menu:Hide()
     menu:SetFrameStrata("DIALOG")
@@ -5261,7 +5319,7 @@ function NP.Build(book)
     if titleBox then
         local title = CreateFrame("Frame", nil, page)
         title:SetAllPoints(titleBox)
-        title:SetFrameLevel(page:GetFrameLevel() + 5)
+        title:SetFrameLevel(math.max(page:GetFrameLevel(), titleBox:GetFrameLevel() or 0) + 5)
         local cover = title:CreateTexture(nil, "BACKGROUND")
         cover:SetPoint("TOPLEFT", 60, -3)
         cover:SetPoint("BOTTOMRIGHT", -60, 3)
@@ -5273,7 +5331,7 @@ function NP.Build(book)
     if container and NP.Part(container, "portrait") then
         local portrait = CreateFrame("Frame", nil, page)
         portrait:SetAllPoints(container)
-        portrait:SetFrameLevel(page:GetFrameLevel() + 5)
+        portrait:SetFrameLevel(math.max(page:GetFrameLevel(), container:GetFrameLevel() or 0) + 5)
         NP.portraitIcon = portrait:CreateTexture(nil, "OVERLAY")
         NP.portraitIcon:SetAllPoints(container.portrait)
         local mask = portrait:CreateMaskTexture(nil, "OVERLAY")
@@ -5297,7 +5355,7 @@ function NP.Build(book)
     arrow:SetSize(14, 14)
     arrow:SetPoint("RIGHT", -6, -1)
     if not NP.Atlas(arrow, "friendslist-categorybutton-arrow-down") then arrow:SetTexture("Interface\\Buttons\\Arrow-Down-Up") end
-    NP.Tooltip(h.char, "Characters", "Pick any of your characters to see their professions.")
+    NP.Tooltip(h.char, "Characters", "Pick any of your characters to see their professions.", "ANCHOR_BOTTOM")
     h.icons = {}
     for i = 1, 8 do
         local b = CreateFrame("Button", nil, h)
@@ -5319,11 +5377,11 @@ function NP.Build(book)
         b:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
         b:SetScript("OnClick", function(self)
             NP.offset, NP.selected = 0, nil
-            if self.gather then
-                NP.gather = self.name
+            if self.special then
+                NP.special, NP.mode = self.special, nil
                 NP.Refresh()
             else
-                NP.gather = nil
+                NP.special = nil
                 PB.Choose(PB.view.char, self.name)
             end
         end)
@@ -5331,8 +5389,8 @@ function NP.Build(book)
             GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
             GameTooltip:AddLine(self.name)
             local p = self.prof
-            if self.name == FARMING then
-                GameTooltip:AddLine("Gold per hour from what you loot, and your best zones.", 1, 1, 1, true)
+            if self.special == "farm" then
+                GameTooltip:AddLine("Gold per hour, your best zones and node sparkles.", 1, 1, 1, true)
             elseif p then
                 GameTooltip:AddLine(string.format("%d / %d", p.skill or 0, p.max or 0), 1, 1, 1)
                 if p.unloaded then GameTooltip:AddLine("Not read yet: open it once on this character.", 0.6, 0.6, 0.6, true) end
@@ -5574,6 +5632,7 @@ function NP.Attach()
     -- follow: open on the profession the window shows, for the character you are on.
     function NP.SetActive(active, follow)
         if not active and not NP.active then return end
+        local fresh = active and not NP.active
         NP.active = active
         if tab.SetChecked then pcall(tab.SetChecked, tab, active) end
         if not active then
@@ -5582,6 +5641,7 @@ function NP.Attach()
             return
         end
         NP.page:Show()
+        if fresh then NP.Home() end
         if follow then
             local T = C_TradeSkillUI
             local base = T and T.IsTradeSkillReady and T.IsTradeSkillReady() and T.GetBaseProfessionInfo and T.GetBaseProfessionInfo()
@@ -5589,7 +5649,8 @@ function NP.Attach()
             local me = line and db.chars and db.chars[PB.CharacterKey()]
             for name, p in pairs(me and me.professions or {}) do
                 if p.line == line then
-                    NP.gather, NP.offset, NP.selected = nil, 0, nil
+                    NP.offset, NP.selected = 0, nil
+                    NP.special = line == FISHING_LINE and "fish" or nil
                     PB.Choose(PB.CharacterKey(), name)
                     return
                 end
@@ -5637,31 +5698,18 @@ function NP.Attach()
 end
 
 -- Windfall on a view: "session", "zones", "fishing", "recipes", "levelling",
--- "settings" (the gear menu), or nil for the one last shown.
+-- "settings" (the gear menu), or nil for the one last shown; always for the
+-- character you are on.
 function NP.ShowView(view)
     local book = NP.book
     if not (book and book:IsShown()) then return end
-    if view == "session" or view == "zones" or view == "fishing" then
-        local me = PB.CharacterKey()
-        local gathering = NP.GatheringOf(db.chars and db.chars[me])
-        local pick
-        if view == "fishing" then
-            for name, g in pairs(gathering) do
-                if g.line == FISHING_LINE then pick = name end
-            end
-        elseif NP.gather and gathering[NP.gather] then
-            pick = NP.gather -- the last one looked at
-        else
-            for _, name in ipairs(PB.SortedKeys(gathering)) do
-                if not pick or gathering[pick].line == FISHING_LINE then pick = name end
-            end
-        end
-        if pick then
-            if PB.view.char ~= me then PB.Choose(me, PB.view.prof) end
-            NP.gather, NP.mode = pick, view
-        end
+    if not NP.active then NP.Home() end
+    if view == "session" or view == "zones" then
+        NP.special, NP.mode = "farm", view
+    elseif view == "fishing" then
+        if NP.FishingOf(db.chars and db.chars[PB.view.char]) then NP.special, NP.mode = "fish", view end
     elseif view == "recipes" or view == "levelling" then
-        NP.gather, NP.mode = nil, view
+        NP.special, NP.mode = nil, view
     end
     NP.SetActive(true, view == "recipes" or view == "levelling")
     NP.Refresh()
@@ -5671,11 +5719,6 @@ function NP.ShowView(view)
     end
 end
 
--- Opens the profession window on Windfall, or closes it when Windfall shows.
--- Opening a crafting profession is how the game itself opens this window, so
--- Windfall does the same with one of yours (an addon may not cast the
--- profession spell the window would otherwise cast as it opens). A character
--- without a crafting profession gets the window on its overview page.
 function NP.Open(view)
     if InCombatLockdown and InCombatLockdown() then
         print("|cff7fd36bWindfall|r: the profession window opens after combat.")
