@@ -1955,7 +1955,7 @@ function BuildBar()
     b.menu:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         GameTooltip:AddLine("Windfall")
-        GameTooltip:AddLine("Your professions in the profession window: recipes, levelling, gathering and fishing.", 1, 1, 1, true)
+        GameTooltip:AddLine("In the profession window: every character's recipes, levelling routes, what earns gold, farming and fishing.", 1, 1, 1, true)
         GameTooltip:AddLine("Click: open or close", 0.6, 0.6, 0.6)
         GameTooltip:AddLine("Drag the bar to move it", 0.6, 0.6, 0.6)
         GameTooltip:Show()
@@ -2002,7 +2002,7 @@ function BuildBar()
     b.time = b.money:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     b.time:SetPoint("LEFT", b.rate, "RIGHT", 6, 0)
     b.money:SetScript("OnClick", function(_, button)
-        if button == "RightButton" then SetMode() elseif ns.OpenWindfall then ns.OpenWindfall("session") end
+        if button == "RightButton" then SetMode() elseif ns.OpenWindfall then ns.OpenWindfall("farming") end
     end)
     b.money:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
@@ -4322,33 +4322,43 @@ end
 -- ---------------------------------------------------- profession window ----
 
 -- Windfall's home: a side tab in the game's profession window, and a page
--- over the window's content laid out like the game's own. The header holds
--- every profession of the character shown (any of yours): crafting ones get
--- Recipes and Levelling, gathering ones the session's gold per hour and the
--- zone history, Fishing also the fishing key. The game's tabs switch back.
--- Everything sits in one table here, for the 200-locals limit.
+-- over the window's content. Five tabs under the window, always the same:
+--   Recipes     any character's profession: its recipes, reagents, Create
+--   Levelling   the cheapest route up for that profession
+--   Make money  every recipe of every character, by profit
+--   Farming     gold per hour, best zones, node sparkles
+--   Fishing     the fishing key (when this character fishes)
+-- The character and profession are picked in the header, on the two tabs
+-- they apply to. Everything sits in one table, for the 200-locals limit.
 do
-local NP = { mode = "recipes", offset = 0, collapsed = {}, tried = {}, covered = {}, checks = {} }
+local NP = { mode = "recipes", offset = 0, moneyOffset = 0, collapsed = {}, tried = {}, quiet = {}, checks = {} }
 local ROW = 20
 local HEADER = 24
 local LIST_W = 296
 local SESSION_ROWS = 14
-local ZONE_ROWS = 18
+local ZONE_ROWS = 12
+local MONEY_ROWS = 19
 local FISHING_LINE = 356
-local TABS_FOR = {
-    craft = { { key = "recipes", label = "Recipes" }, { key = "levelling", label = "Levelling" } },
-    farm = { { key = "session", label = "Session" }, { key = "zones", label = "Zones" } },
-    fish = { { key = "fishing", label = "Fishing" } },
-    fishCraft = { { key = "fishing", label = "Fishing" }, { key = "recipes", label = "Recipes" } },
+local TABS = {
+    { key = "recipes", label = "Recipes" },
+    { key = "levelling", label = "Levelling" },
+    { key = "money", label = "Make money" },
+    { key = "farming", label = "Farming" },
+    { key = "fishing", label = "Fishing" },
 }
--- Farming: gold per hour, the zone history and node sparkles, for every character.
-local FARMING = "Farming"
-local FARMING_ICON = "Interface\\Icons\\INV_Misc_Bag_10"
-local FISHING_ICON = "Interface\\Icons\\Trade_Fishing"
+-- Names a view can be asked for by (the bar, /wf).
+local VIEW = { recipes = "recipes", prof = "recipes", levelling = "levelling", money = "money",
+    farming = "farming", session = "farming", zones = "farming", fishing = "fishing" }
+local CAPTION = { money = "Make money", farming = "Farming", fishing = "Fishing" }
+local ICON = { money = "Interface\\Icons\\INV_Misc_Coin_01", farming = "Interface\\Icons\\INV_Misc_Bag_10",
+    fishing = "Interface\\Icons\\Trade_Fishing" }
 local GATHER_ORDER = { 182, 186, 393, 356 }
 local SPARKLES = { { "sparkleHerb", "Herbs" }, { "sparkleOre", "Ore" }, { "sparkleFish", "Fishing pools" } }
 -- Professions with a crafting window, to open the window with.
 local CRAFT_LINES = { [171] = true, [164] = true, [333] = true, [202] = true, [165] = true, [197] = true, [185] = true, [129] = true }
+local STRATA = { BACKGROUND = 1, LOW = 2, MEDIUM = 3, HIGH = 4, DIALOG = 5, FULLSCREEN = 6, FULLSCREEN_DIALOG = 7, TOOLTIP = 8 }
+
+-- ------------------------------------------------------------- widgets --
 
 function NP.Make(kind, name, parent, template)
     if template then
@@ -4380,6 +4390,18 @@ function NP.Tooltip(owner, title, text, anchor)
     owner:SetScript("OnLeave", function() GameTooltip:Hide() end)
 end
 
+function NP.ItemTooltip(owner)
+    owner:SetScript("OnEnter", function(self)
+        if type(self.itemID) == "number" and self.itemID > 0 then
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetItemByID(self.itemID)
+            GameTooltip:Show()
+        end
+    end)
+    owner:SetScript("OnLeave", function() GameTooltip:Hide() end)
+end
+
+-- A framed box, like the game's insets.
 function NP.Box(parent)
     local box = NP.Make("Frame", nil, parent, "BackdropTemplate")
     if box.SetBackdrop then
@@ -4396,6 +4418,38 @@ function NP.Button(parent, text, width)
     b:SetSize(width or 100, 22)
     b:SetText(text)
     return b
+end
+
+function NP.Text(parent, font, justify)
+    local fs = parent:CreateFontString(nil, "OVERLAY", font or "GameFontHighlight")
+    fs:SetJustifyH(justify or "LEFT")
+    fs:SetWordWrap(false)
+    return fs
+end
+
+-- A thin scroll bar down the right edge of a list.
+function NP.ScrollBar(parent)
+    local s = CreateFrame("Frame", nil, parent)
+    s:SetPoint("TOPRIGHT", 0, 0)
+    s:SetPoint("BOTTOMRIGHT", 0, 0)
+    s:SetWidth(6)
+    local track = s:CreateTexture(nil, "BACKGROUND")
+    track:SetAllPoints()
+    track:SetColorTexture(0, 0, 0, 0.5)
+    s.thumb = s:CreateTexture(nil, "ARTWORK")
+    s.thumb:SetWidth(6)
+    s.thumb:SetColorTexture(0.75, 0.6, 0.3, 0.9)
+    return s
+end
+
+function NP.SetScroll(s, offset, maxOffset, total, room)
+    s:SetShown(maxOffset > 0)
+    if maxOffset > 0 then
+        local thumb = math.max(24, room * (1 - maxOffset / total))
+        s.thumb:SetHeight(thumb)
+        s.thumb:ClearAllPoints()
+        s.thumb:SetPoint("TOP", s, "TOP", 0, -(room - thumb) * offset / maxOffset)
+    end
 end
 
 -- A setting's checkbox: a saved key (on unless switched off), or its own get and set.
@@ -4427,14 +4481,32 @@ function NP.RefreshChecks()
     if NP.keyButton then NP.keyButton:SetText("Key: " .. (db.fishKey or "click to choose")) end
 end
 
--- A row of the Settings list, by its key or label.
+-- A row of the settings list, by its key or label.
 function NP.Setting(match)
     for _, row in ipairs(SETTINGS) do
         if row.key == match or row.label == match then return row end
     end
 end
 
--- What the page shows: the character and profession picked in Windfall.
+-- A node sparkle switch for one kind of node; switching one on switches sparkles on.
+function NP.SparkleCheck(parent, key, label)
+    return NP.Check(parent, { label = label,
+        get = function() return db.sparkle and db[key] ~= false end,
+        set = function(value)
+            db[key] = value
+            if value and not db.sparkle then
+                db.sparkle = true
+                ApplySparkles()
+            end
+            SparkleRecheck()
+            if UpdateBarIcons then UpdateBarIcons() end
+        end,
+        tip = "The nearest one close by that you can gather gets a sparkle and the game's gather icon. The game only picks up nodes within about 15 yards." })
+end
+
+-- --------------------------------------------------------- what is shown --
+
+-- The character and profession picked (Recipes and Levelling).
 function NP.Selection()
     local char, prof = PB.CurrentProfession()
     return char, prof, PB.view
@@ -4444,39 +4516,23 @@ function NP.IsMine()
     return PB.view.char == PB.CharacterKey()
 end
 
--- The gathering profession shown, when one is.
--- A character's Fishing: its name, its skill (saved with the gathering
--- professions, else its crafting entry) and that crafting entry, which holds
--- the Camping recipes once the window was read.
-function NP.FishingOf(char)
-    if not char then return nil end
-    local name, skill, craft
-    for n, g in pairs(char.gathering or {}) do
-        if g.line == FISHING_LINE then name, skill = n, g end
-    end
-    for n, p in pairs(char.professions or {}) do
-        if p.line == FISHING_LINE then
-            craft = p
-            name, skill = name or n, skill or p
-        end
-    end
-    return name, skill, craft
-end
-
--- The tabs under the window for what is shown.
-function NP.Tabs(char)
-    if NP.special == "fish" then
-        local _, _, craft = NP.FishingOf(char)
-        return (craft and next(craft.recipes or {})) and TABS_FOR.fishCraft or TABS_FOR.fish
-    end
-    return TABS_FOR[NP.Kind()]
-end
-
 function NP.Crafting()
     return NP.mode == "recipes" or NP.mode == "levelling"
 end
 
--- The character you are on, as the window opens.
+-- Fishing on the character you are on: its name and skill.
+function NP.MyFishing()
+    local char = db.chars and db.chars[PB.CharacterKey()]
+    if not char then return nil end
+    for name, g in pairs(char.gathering or {}) do
+        if g.line == FISHING_LINE then return name, g end
+    end
+    for name, p in pairs(char.professions or {}) do
+        if p.line == FISHING_LINE then return name, p end
+    end
+end
+
+-- The character you are on, as the page opens.
 function NP.Home()
     local me = PB.CharacterKey()
     local char = db.chars and db.chars[me]
@@ -4484,12 +4540,6 @@ function NP.Home()
     local view = PB.view
     view.char, view.offset, view.target, view.chosen = me, 0, nil, nil
     if not char.professions[view.prof or ""] then view.prof = PB.SortedKeys(char.professions)[1] end
-    if NP.special == "fish" and not NP.FishingOf(char) then NP.special = nil end
-end
-
--- "fish", "farm", or "craft" for a crafting profession.
-function NP.Kind()
-    return NP.special or "craft"
 end
 
 function NP.ProfessionOpen(line)
@@ -4499,16 +4549,24 @@ function NP.ProfessionOpen(line)
     return base and SkillLineOf(base) == line
 end
 
+-- Opening one of your professions (to craft from it, or to read its recipes)
+-- makes the game close and reopen its window: Windfall comes back on top.
+function NP.OpenProfession(line)
+    local T = C_TradeSkillUI
+    if not (T and T.OpenTradeSkill) or (InCombatLockdown and InCombatLockdown()) then return end
+    NP.wantView, NP.wantUntil = "last", GetTime() + 2
+    T.OpenTradeSkill(line)
+end
+
 -- Create: only for the character you are on, from its own profession.
 function NP.Craft(recipeID, count)
     local _, prof = NP.Selection()
     if not (prof and NP.IsMine() and count and count > 0) then return end
-    local T = C_TradeSkillUI
     if not NP.ProfessionOpen(prof.line) then
-        if T.OpenTradeSkill then T.OpenTradeSkill(prof.line) end
+        NP.OpenProfession(prof.line) -- the first click opens it; the next one crafts
         return
     end
-    T.CraftRecipe(recipeID, count)
+    C_TradeSkillUI.CraftRecipe(recipeID, count)
 end
 
 -- Recipes counted as learned before their profession window was read have no
@@ -4524,15 +4582,300 @@ function NP.Fill(id, recipe)
     if #read.reagents > 0 then recipe.noReagents = nil end
 end
 
+function NP.ItemName(itemID)
+    return (C_Item and C_Item.GetItemNameByID and C_Item.GetItemNameByID(itemID)) or ("item " .. itemID)
+end
+
+function NP.RecipeIcon(id, recipe)
+    return recipe.item and ItemIcon(recipe.item)
+        or (C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(id)) or 134400
+end
+
+-- The route's next target after the one planned, or nil to go back to the next cap.
+function NP.NextTarget(prof)
+    local current = PB.view.target or RouteTarget(prof.skill or 1)
+    for _, t in ipairs(ROUTE_TARGETS) do
+        if t > current then return t end
+    end
+end
+
+-- ------------------------------------------------- the game's own pages --
+
+-- The game's pages stay as they are underneath. Hiding them confuses the
+-- window (it closes itself when it finds no page showing), so they are made
+-- invisible instead, and what they draw above the window (the skill bars)
+-- stops taking the mouse. All of it is put back when Windfall's page goes.
+function NP.Quiet()
+    local book = NP.book
+    local keep = { [NP.page] = true, [NP.tab] = true }
+    for _, key in ipairs({ "NineSlice", "CloseButton", "PortraitContainer", "TitleContainer", "MaximizeMinimize",
+        "MaxMinButtonFrame", "TopTileStreaks", "ProfessionsOverviewTab" }) do
+        local f = NP.Part(book, key)
+        if f then keep[f] = true end
+    end
+    for _, t in ipairs(NP.Part(book, "rightProfessionTabs") or {}) do keep[t] = true end
+    if _G.WhatsTrainingCraftingTab then keep[_G.WhatsTrainingCraftingTab] = true end
+    local base = STRATA[book:GetFrameStrata() or ""] or 3
+    local fighting = InCombatLockdown and InCombatLockdown()
+    local function Mouse(frame)
+        if (STRATA[frame:GetFrameStrata() or ""] or base) > base and frame:IsMouseEnabled() == true
+            and not (fighting and frame:IsProtected()) then
+            local q = NP.quiet[frame] or {}
+            q.mouse = true
+            NP.quiet[frame] = q
+            frame:EnableMouse(false)
+        end
+        for _, child in ipairs({ frame:GetChildren() }) do Mouse(child) end
+    end
+    local right, bottom = book:GetRight(), book:GetBottom()
+    for _, child in ipairs({ book:GetChildren() }) do
+        if not keep[child] then
+            -- what hangs outside the window (other addons' side tabs) stays
+            local left, top = child:GetLeft(), child:GetTop()
+            local outside = child:IsShown() and ((left and right and left >= right - 4) or (top and bottom and top <= bottom + 4))
+            if not outside then
+                local q = NP.quiet[child] or {}
+                if q.alpha == nil then q.alpha = child:GetAlpha() or 1 end
+                NP.quiet[child] = q
+                child:SetAlpha(0)
+                Mouse(child)
+            end
+        end
+    end
+end
+
+function NP.Unquiet()
+    local quiet = NP.quiet
+    NP.quiet = {}
+    local fighting = InCombatLockdown and InCombatLockdown()
+    for frame, q in pairs(quiet) do
+        if q.alpha ~= nil then frame:SetAlpha(q.alpha) end
+        if q.mouse and not (fighting and frame:IsProtected()) then frame:EnableMouse(true) end
+    end
+end
+
+-- ------------------------------------------------------------- refresh --
+
+function NP.Refresh()
+    local page = NP.page
+    if not (page and page:IsShown()) then return end
+    if NP.rescan then
+        NP.rescan = false
+        NP.Quiet()
+    else
+        for frame, q in pairs(NP.quiet) do
+            if q.alpha ~= nil then frame:SetAlpha(0) end -- the game may have faded one back in
+        end
+    end
+    if NoteCharacter then NoteCharacter() end -- this character's skills as the game has them now
+    if NP.mode == "fishing" and not NP.MyFishing() then NP.mode = "recipes" end
+    local char, prof = NP.Selection()
+    NP.RefreshTabs()
+    NP.RefreshHeader(char, prof)
+    NP.RefreshChecks()
+    local mode = NP.mode
+    NP.craft:SetShown(NP.Crafting())
+    NP.money:SetShown(mode == "money")
+    NP.farming:SetShown(mode == "farming")
+    NP.fishing:SetShown(mode == "fishing")
+    if NP.Crafting() then
+        NP.DrawCraft(char, prof)
+    elseif mode == "money" then
+        NP.DrawMoney()
+    elseif mode == "farming" then
+        NP.DrawFarming()
+    else
+        NP.DrawFishing()
+    end
+end
+
+function NP.SetMode(mode)
+    NP.mode, NP.offset, NP.selected = mode, 0, nil
+    if NP.menu then NP.menu:Hide() end
+    NP.Refresh()
+end
+
+-- The tabs under the window. Fishing is only there when this character fishes.
+function NP.RefreshTabs()
+    local fishes = NP.MyFishing() ~= nil
+    for i, b in ipairs(NP.modeTabs) do
+        local m = TABS[i]
+        b:SetShown(m.key ~= "fishing" or fishes)
+        if m.key == NP.mode then
+            if PanelTemplates_SelectTab then pcall(PanelTemplates_SelectTab, b) end
+        elseif PanelTemplates_DeselectTab then
+            pcall(PanelTemplates_DeselectTab, b)
+        end
+        local fs = b:GetFontString()
+        if fs and not NP.tabArt then
+            if m.key == NP.mode then fs:SetTextColor(1, 1, 1) else fs:SetTextColor(1, 0.82, 0) end
+        end
+    end
+end
+
+function NP.RefreshHeader(char, prof)
+    local h = NP.header
+    local crafting = NP.Crafting()
+    for _, b in ipairs(h.icons) do b:Hide() end
+    h.char:SetShown(crafting)
+    h.caption:SetShown(not crafting)
+    h.barFrame:ClearAllPoints()
+    h.barFrame:SetPoint("RIGHT", h.gear, "LEFT", -8, 0)
+    local shown, shownName, icon, title
+    if not crafting then
+        h.caption:SetText(CAPTION[NP.mode] or "")
+        icon, title = ICON[NP.mode], "Windfall - " .. (CAPTION[NP.mode] or "")
+        if NP.mode == "fishing" then shownName, shown = NP.MyFishing() end
+        h.barFrame:SetPoint("LEFT", h.caption, "RIGHT", 16, 0)
+    elseif not char then
+        h.char:SetText("No characters")
+        title = "Windfall"
+    else
+        h.char:SetText(PB.DisplayName(PB.view.char))
+        local fs = h.char:GetFontString()
+        local color = char.class and RAID_CLASS_COLORS and RAID_CLASS_COLORS[char.class]
+        if fs and color then fs:SetTextColor(color.r, color.g, color.b) end
+        local last = h.char
+        for i, name in ipairs(PB.SortedKeys(char.professions)) do
+            local b = h.icons[i]
+            if b then
+                local p = char.professions[name]
+                b.name, b.prof = name, p
+                b.icon:SetTexture(PB.ProfessionIcon(p))
+                b.icon:SetDesaturated(p.unloaded and true or false)
+                b.ring:SetShown(name == PB.view.prof)
+                b:Show()
+                last = b
+            end
+        end
+        h.barFrame:SetPoint("LEFT", last, "RIGHT", 14, 0)
+        shown, shownName, icon = prof, PB.view.prof, prof and PB.ProfessionIcon(prof)
+        title = (PB.view.prof or "Professions") .. " - " .. PB.DisplayName(PB.view.char)
+    end
+    h.barFrame:SetShown(shown ~= nil and shown.max ~= nil)
+    if shown and shown.max then
+        h.bar:SetMinMaxValues(0, math.max(shown.max or 1, 1))
+        h.bar:SetValue(shown.skill or 0)
+        h.bar.text:SetText(string.format("%s  %d / %d", shownName or "", shown.skill or 0, shown.max or 0))
+    end
+    if NP.portraitIcon then NP.portraitIcon:SetTexture(icon or "Interface\\AddOns\\Windfall\\Media\\icon") end
+    if NP.titleText then NP.titleText:SetText(title or "Windfall") end
+end
+
+-- ------------------------------------------- every character's professions --
+
+-- The character button's menu: each character with its professions under
+-- it, so any profession on the account is one click.
+function NP.ToggleMenu(anchor)
+    local menu = NP.menu
+    if menu and menu:IsShown() then menu:Hide() return end
+    if not menu then
+        menu = NP.Make("Frame", "WindfallProfessionMenu", NP.page, "BackdropTemplate")
+        menu:SetFrameStrata("DIALOG")
+        menu:EnableMouse(true)
+        if menu.SetBackdrop then
+            menu:SetBackdrop({ bgFile = "Interface\\Tooltips\\UI-Tooltip-Background", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+                edgeSize = 14, insets = { left = 3, right = 3, top = 3, bottom = 3 } })
+            menu:SetBackdropColor(0.05, 0.05, 0.07, 0.97)
+        end
+        menu.rows = {}
+        if UISpecialFrames then table.insert(UISpecialFrames, "WindfallProfessionMenu") end -- Escape closes it
+        NP.menu = menu
+    end
+    menu:ClearAllPoints()
+    menu:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -2)
+    local me = PB.CharacterKey()
+    local keys = PB.SortedKeys(db.chars)
+    table.sort(keys, function(x, y)
+        if (x == me) ~= (y == me) then return x == me end
+        return x < y
+    end)
+    local n = 0
+    local function Row()
+        n = n + 1
+        local row = menu.rows[n]
+        if not row then
+            row = CreateFrame("Button", nil, menu)
+            row:SetSize(260, 20)
+            row:SetPoint("TOPLEFT", 6, -6 - (n - 1) * 20)
+            row.icon = row:CreateTexture(nil, "ARTWORK")
+            row.icon:SetSize(16, 16)
+            row.icon:SetPoint("LEFT", 18, 0)
+            row.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+            row.text = NP.Text(row, "GameFontHighlightSmall")
+            row.right = NP.Text(row, "GameFontHighlightSmall", "RIGHT")
+            row.right:SetPoint("RIGHT", -6, 0)
+            row:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
+            row:SetScript("OnClick", function(self)
+                menu:Hide()
+                if self.forget and IsShiftKeyDown and IsShiftKeyDown() then
+                    if StaticPopup_Show then StaticPopup_Show("WINDFALL_FORGET_CHARACTER", PB.DisplayName(self.key), nil, self.key) end
+                    return
+                end
+                NP.offset, NP.selected = 0, nil
+                PB.Choose(self.key, self.prof or nil)
+            end)
+            row:SetScript("OnEnter", function(self)
+                if not self.forget then return end
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:AddLine(PB.DisplayName(self.key))
+                GameTooltip:AddLine("Shift-click: forget this character in Windfall.", 0.6, 0.6, 0.6, true)
+                GameTooltip:Show()
+            end)
+            row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            menu.rows[n] = row
+        end
+        row:Show()
+        return row
+    end
+    for _, key in ipairs(keys) do
+        local char = db.chars[key]
+        local names = PB.SortedKeys(char.professions)
+        local row = Row()
+        row.key, row.forget = key, true
+        row.prof = (key == PB.view.char and PB.view.prof) or names[1] or false
+        row.icon:Hide()
+        row.text:ClearAllPoints()
+        row.text:SetPoint("LEFT", 6, 0)
+        row.text:SetText(PB.ClassColored(char, key) .. (key == me and " |cff999999(you)|r" or ""))
+        row.right:SetText(char.level and ("|cff999999level " .. char.level .. "|r") or "")
+        for _, name in ipairs(names) do
+            local p = char.professions[name]
+            local r = Row()
+            r.key, r.prof, r.forget = key, name, false
+            r.icon:Show()
+            r.icon:SetTexture(PB.ProfessionIcon(p))
+            r.icon:SetDesaturated(p.unloaded and true or false)
+            r.text:ClearAllPoints()
+            r.text:SetPoint("LEFT", 40, 0)
+            local current = key == PB.view.char and name == PB.view.prof
+            r.text:SetText((current and "|cffffd100" or "|cffffffff") .. name .. "|r")
+            r.right:SetText(p.unloaded and "|cff999999not read yet|r" or string.format("%d / %d", p.skill or 0, p.max or 0))
+        end
+        if #names == 0 then
+            local r = Row()
+            r.key, r.prof, r.forget = key, false, false
+            r.icon:Hide()
+            r.text:ClearAllPoints()
+            r.text:SetPoint("LEFT", 40, 0)
+            r.text:SetText("|cff999999no crafting professions|r")
+            r.right:SetText("")
+        end
+    end
+    for i = n + 1, #menu.rows do menu.rows[i]:Hide() end
+    menu:SetSize(272, 12 + n * 20)
+    menu:Show()
+end
+
+-- ------------------------------------------------- Recipes and Levelling --
+
 -- The list: categories with their recipes (Recipes), or the route (Levelling).
 function NP.BuildList(prof)
     local nodes = {}
-    local search = NP.search and NP.search:GetText()
-    search = type(search) == "string" and search:lower() or ""
     if NP.mode == "levelling" then
         local char = (db.chars or {})[PB.view.char]
         local target = PB.view.target or RouteTarget(prof.skill or 1)
-        local steps = ComputeRoute(prof, target, char and char.level)
+        local steps, _, _, gaps = ComputeRoute(prof, target, char and char.level)
         nodes[#nodes + 1] = { header = string.format("Route %d to %d", prof.skill or 1, target) }
         for _, st in ipairs(steps) do
             if st.rank then
@@ -4548,11 +4891,15 @@ function NP.BuildList(prof)
         end
         if #nodes == 1 then
             nodes[2] = { text = (prof.skill or 0) >= (prof.max or 0) and (prof.max or 0) > 0
-                and "|cff7fd36bMaxed for now.|r |cff999999See Recipes for what earns.|r"
+                and "|cff7fd36bMaxed for now.|r |cff999999Make money shows what earns.|r"
                 or "|cff999999No priced recipe for the next points: scan the auction house.|r" }
+        elseif gaps and gaps[1] then
+            nodes[#nodes + 1] = { text = string.format("|cffff6060No priced recipe from %d: scan the auction house.|r", gaps[1]) }
         end
         return nodes
     end
+    local search = NP.search:GetText()
+    search = type(search) == "string" and search:lower() or ""
     local groups, names = {}, {}
     for id, recipe in pairs(prof.recipes) do
         if search == "" or (recipe.name or ""):lower():find(search, 1, true) then
@@ -4581,197 +4928,54 @@ function NP.BuildList(prof)
         end
     end
     if #nodes == 0 then
-        nodes[1] = { text = prof.unloaded and "|cff999999Not loaded yet: open this profession once on its character.|r"
-            or "|cff999999No recipes match.|r" }
+        nodes[1] = { text = search ~= "" and "|cff999999No recipes match.|r" or "|cff999999No recipes read yet.|r" }
     end
     return nodes
 end
 
--- The game's own content goes away while Windfall's page shows, and comes back
--- before any of its tabs is clicked. Its side tabs, frame and title stay.
-function NP.Cover()
-    local book = NP.book
-    local keep = { [NP.page] = true, [NP.tab] = true }
-    for _, key in ipairs({ "NineSlice", "CloseButton", "PortraitContainer", "TitleContainer", "MaximizeMinimize",
-        "MaxMinButtonFrame", "TopTileStreaks", "ProfessionsOverviewTab" }) do
-        local f = NP.Part(book, key)
-        if f then keep[f] = true end
-    end
-    for _, t in ipairs(NP.Part(book, "rightProfessionTabs") or {}) do keep[t] = true end
-    local right, bottom = book:GetRight(), book:GetBottom()
-    for _, child in ipairs({ book:GetChildren() }) do
-        if not keep[child] and child:IsShown() and not NP.covered[child] then
-            local left, top = child:GetLeft(), child:GetTop()
-            local outside = (left and right and left >= right - 4) or (top and bottom and top <= bottom + 4)
-            local locked = InCombatLockdown() and child.IsProtected and child:IsProtected()
-            if not outside and not locked then
-                NP.covered[child] = true
-                child:Hide()
-            end
-        end
-    end
-end
-
-function NP.Uncover()
-    local covered = NP.covered
-    NP.covered = {}
-    for child in pairs(covered) do
-        if not (InCombatLockdown() and child.IsProtected and child:IsProtected()) then child:Show() end
-    end
-end
-
--- Keeps the page valid for the character shown: Fishing only when it fishes,
--- Farming when it crafts nothing, and a tab that belongs to what is shown.
-function NP.Settle(char, prof)
-    if not char then NP.special = nil return end
-    if NP.special == "fish" and not NP.FishingOf(char) then NP.special = nil end
-    if not NP.special then
-        if prof and prof.line == FISHING_LINE then
-            NP.special = "fish"
-        elseif not prof then
-            NP.special = "farm"
-        end
-    end
-    -- Fishing's Camping recipes are its crafting entry.
-    if NP.special == "fish" then
-        local name, _, craft = NP.FishingOf(char)
-        if craft then PB.view.prof = name end
-    end
-    local tabs = NP.Tabs(char)
-    for _, m in ipairs(tabs) do
-        if m.key == NP.mode then return end
-    end
-    NP.mode = tabs[1].key
-end
-
-function NP.Refresh()
-    local page = NP.page
-    if not (page and page:IsShown()) then return end
-    NP.Cover()
-    if NP.IsMine() and NoteCharacter then NoteCharacter() end -- skills as the game has them now
-    local char, prof = NP.Selection()
-    NP.Settle(char, prof)
-    char, prof = NP.Selection()
-    NP.RefreshHeader(char, prof)
-    NP.RefreshTabs(NP.Tabs(char))
-    NP.RefreshChecks()
-    local crafting = NP.Crafting()
-    NP.search:SetShown(crafting)
-    NP.listBox:SetShown(crafting)
-    NP.detail:SetShown(crafting)
-    NP.gpage:SetShown(not crafting)
-    if not crafting then
-        NP.session:SetShown(NP.mode == "session")
-        NP.zones:SetShown(NP.mode == "zones")
-        NP.fishing:SetShown(NP.mode == "fishing")
-        if NP.mode == "session" then NP.DrawSession() elseif NP.mode == "zones" then NP.DrawZones() else NP.DrawFishing() end
-        return
-    end
-    if not prof then
-        NP.nodes = { { text = "|cff999999No professions saved yet.|r" } }
+function NP.DrawCraft(char, prof)
+    local recipes = NP.mode == "recipes"
+    NP.search:SetShown(recipes)
+    NP.listBox:ClearAllPoints()
+    NP.listBox:SetPoint("TOPLEFT", 0, recipes and -30 or 0)
+    NP.listBox:SetPoint("BOTTOMLEFT", 0, 0)
+    NP.list:ClearAllPoints()
+    NP.list:SetPoint("TOPLEFT", 5, -6)
+    NP.list:SetPoint("BOTTOMRIGHT", -5, recipes and 6 or 36)
+    if not char then
+        NP.nodes = { { text = "|cff999999Nothing saved yet: open one of your professions once.|r" } }
+    elseif not prof then
+        NP.nodes = { { text = "|cff999999" .. PB.DisplayName(PB.view.char) .. " has no crafting professions.|r" } }
     else
-        SyncLearned(prof, PB.view.char)
-        NP.nodes = NP.BuildList(prof)
+        SyncLearned(prof, PB.view.char) -- what the trainer taught since it was read
+        if prof.unloaded and not next(prof.recipes) then
+            NP.nodes = { { text = "|cff999999Recipes not read yet.|r" } }
+        else
+            NP.nodes = NP.BuildList(prof)
+        end
     end
-    -- default selection: the route's first step, or the first recipe
-    local found
-    for _, n in ipairs(NP.nodes) do
-        if n.id and n.id == NP.selected then found = n end
+    -- selection: the one picked, else the route's first step or the first recipe
+    local found, index
+    for i, n in ipairs(NP.nodes) do
+        if n.id and n.id == NP.selected then found, index = n, i end
     end
     if not found then
-        for _, n in ipairs(NP.nodes) do
-            if n.id then found = n break end
+        for i, n in ipairs(NP.nodes) do
+            if n.id then found, index = n, i break end
         end
     end
     NP.selected = found and found.id
     NP.selectedNode = found
+    if NP.reveal and index then NP.offset = math.max(0, index - 6) end
+    NP.reveal = nil
     NP.DrawList()
     NP.DrawDetail(prof)
-    NP.shop:SetShown(prof ~= nil and NP.mode == "levelling")
-end
-
--- The tabs under the window, for the kind of profession shown.
-function NP.RefreshTabs(tabs)
-    for i, b in ipairs(NP.modeTabs) do
-        local m = tabs[i]
-        if m then
-            if b.key ~= m.key then
-                b.key = m.key
-                b:SetText(m.label)
-                if NP.tabArt and PanelTemplates_TabResize then pcall(PanelTemplates_TabResize, b, 0) end
-            end
-            b:Show()
-            if m.key == NP.mode then
-                if PanelTemplates_SelectTab then pcall(PanelTemplates_SelectTab, b) end
-            elseif PanelTemplates_DeselectTab then
-                pcall(PanelTemplates_DeselectTab, b)
-            end
-            local fs = b:GetFontString()
-            if fs and not NP.tabArt then
-                if m.key == NP.mode then fs:SetTextColor(1, 1, 1) else fs:SetTextColor(1, 0.82, 0) end
-            end
-        else
-            b:Hide()
-        end
-    end
-end
-
-function NP.RefreshHeader(char, prof)
-    local h = NP.header
-    for _, b in ipairs(h.icons) do b:Hide() end
-    if not char then
-        h.char:SetText("No characters")
-        h.barFrame:Hide()
-        return
-    end
-    h.char:SetText(PB.DisplayName(PB.view.char))
-    local fs = h.char:GetFontString()
-    local color = char.class and RAID_CLASS_COLORS and RAID_CLASS_COLORS[char.class]
-    if fs and color then fs:SetTextColor(color.r, color.g, color.b) end
-    -- crafting professions, then Fishing, then Farming
-    local entries = {}
-    for _, name in ipairs(PB.SortedKeys(char.professions)) do
-        local p = char.professions[name]
-        if p.line ~= FISHING_LINE then
-            entries[#entries + 1] = { name = name, p = p, icon = PB.ProfessionIcon(p), selected = not NP.special and name == PB.view.prof }
-        end
-    end
-    local fishName, fishSkill = NP.FishingOf(char)
-    if fishName then
-        entries[#entries + 1] = { name = fishName, p = fishSkill, special = "fish", icon = FISHING_ICON, selected = NP.special == "fish" }
-    end
-    entries[#entries + 1] = { name = FARMING, special = "farm", icon = FARMING_ICON, selected = NP.special == "farm" }
-    local last = h.char
-    for i, e in ipairs(entries) do
-        local b = h.icons[i]
-        if b then
-            b.name, b.prof, b.special = e.name, e.p or false, e.special or false
-            b.icon:SetTexture(e.icon or "Interface\\Icons\\INV_Misc_QuestionMark")
-            b.icon:SetDesaturated(e.p and e.p.unloaded and not e.special and true or false)
-            b.ring:SetShown(e.selected)
-            b:Show()
-            last = b
-        end
-    end
-    local shown, shownName, icon
-    if NP.special == "fish" then
-        shown, shownName, icon = fishSkill, fishName, FISHING_ICON
-    elseif NP.special == "farm" then
-        shownName, icon = FARMING, FARMING_ICON
-    else
-        shown, shownName, icon = prof, PB.view.prof, prof and PB.ProfessionIcon(prof)
-    end
-    h.barFrame:ClearAllPoints()
-    h.barFrame:SetPoint("LEFT", last, "RIGHT", 14, 0)
-    h.barFrame:SetPoint("RIGHT", h.gear, "LEFT", -8, 0)
-    h.barFrame:SetShown(shown ~= nil and shown.max ~= nil)
-    if shown and shown.max then
-        h.bar:SetMinMaxValues(0, math.max(shown.max or 1, 1))
-        h.bar:SetValue(shown.skill or 0)
-        h.bar.text:SetText(string.format("%s  %d / %d", shownName, shown.skill or 0, shown.max or 0))
-    end
-    if icon and NP.portraitIcon then NP.portraitIcon:SetTexture(icon) end
-    if NP.titleText then NP.titleText:SetText((shownName or "Windfall") .. " - " .. PB.DisplayName(PB.view.char)) end
+    -- under the route: how far to plan, and what to buy for it
+    local planned = not recipes and prof ~= nil and NP.nodes[1].header ~= nil
+    local further = planned and (NP.NextTarget(prof) or (PB.view.target and RouteTarget(prof.skill or 1))) or nil
+    NP.plan:SetShown(further ~= nil)
+    if further then NP.plan:SetText("Plan to " .. further) end
+    NP.shop:SetShown(planned)
 end
 
 function NP.Room()
@@ -4804,7 +5008,8 @@ function NP.DrawList()
         if n.header then
             headerIndex = headerIndex + 1
             b = NP.HeaderButton(headerIndex)
-            NP.SetHeader(b, n)
+            b.label:SetText(n.header .. (n.count and string.format(" |cffaaaaaa(%d)|r", n.count) or ""))
+            b.toggle:SetText(NP.mode == "recipes" and (NP.collapsed[n.header] and "+" or "-") or "")
         else
             rowIndex = rowIndex + 1
             b = NP.RowButton(rowIndex)
@@ -4819,22 +5024,17 @@ function NP.DrawList()
         b:Show()
         y = y + height
     end
-    -- scroll bar: shown when the list is longer than the room
-    local s = NP.scroll
-    s:SetShown(maxOffset > 0)
-    if maxOffset > 0 then
-        local track = NP.Room()
-        local thumb = math.max(24, track * (1 - maxOffset / #nodes))
-        s.thumb:SetHeight(thumb)
-        s.thumb:ClearAllPoints()
-        s.thumb:SetPoint("TOP", s, "TOP", 0, -(track - thumb) * NP.offset / maxOffset)
-    end
+    NP.SetScroll(NP.scroll, NP.offset, maxOffset, #nodes, room)
 end
 
 function NP.Scroll(delta)
-    if not NP.Crafting() then return end
-    NP.offset = math.max(0, math.min(NP.maxOffset or 0, NP.offset - delta * 3))
-    NP.DrawList()
+    if NP.Crafting() then
+        NP.offset = math.max(0, math.min(NP.maxOffset or 0, NP.offset - delta * 3))
+        NP.DrawList()
+    elseif NP.mode == "money" then
+        NP.moneyOffset = NP.moneyOffset - delta * 3
+        NP.DrawMoneyRows()
+    end
 end
 
 function NP.HeaderButton(i)
@@ -4870,21 +5070,14 @@ function NP.HeaderButton(i)
     return b
 end
 
-function NP.SetHeader(b, n)
-    b.label:SetText(n.header .. (n.count and string.format(" |cffaaaaaa(%d)|r", n.count) or ""))
-    b.toggle:SetText(NP.mode == "recipes" and (NP.collapsed[n.header] and "+" or "-") or "")
-end
-
 function NP.RowButton(i)
     local b = NP.rowPool[i]
     if b then return b end
     b = CreateFrame("Button", nil, NP.list)
     b:SetHeight(ROW)
-    b.text = b:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    b.text = NP.Text(b)
     b.text:SetPoint("LEFT", 18, 0)
     b.text:SetPoint("RIGHT", -4, 0)
-    b.text:SetJustifyH("LEFT")
-    b.text:SetWordWrap(false)
     b.selectedTex = b:CreateTexture(nil, "BACKGROUND")
     b.selectedTex:SetAllPoints()
     if not NP.Atlas(b.selectedTex, "Professions_Recipe_Active") then b.selectedTex:SetColorTexture(1, 0.82, 0, 0.18) end
@@ -4899,28 +5092,32 @@ function NP.RowButton(i)
     return b
 end
 
-function NP.ItemName(itemID)
-    return (C_Item and C_Item.GetItemNameByID and C_Item.GetItemNameByID(itemID)) or ("item " .. itemID)
-end
-
 function NP.DrawDetail(prof)
     local d = NP.detail
     local n = NP.selectedNode
     if not (prof and n and n.recipe) then
         d.content:Hide()
-        d.empty:SetText(prof and prof.unloaded and "Open this profession once on its character to read its recipes."
-            or "Pick a recipe on the left.")
+        d.create:Hide()
+        d.createAll:Hide()
+        d.note:SetText("")
+        local unread = prof and prof.unloaded
+        d.empty:SetText(unread and (NP.IsMine() and "Windfall has not read this profession's recipes yet."
+                or ("Log in on " .. PB.DisplayName(PB.view.char) .. " and open this profession once to read its recipes."))
+            or (prof and "Pick a recipe on the left." or ""))
         d.empty:Show()
+        d.load:SetShown(unread and NP.IsMine() or false)
         return
     end
     d.content:Show()
+    d.create:Show()
+    d.createAll:Show()
     d.empty:Hide()
+    d.load:Hide()
     local c = d.content
     local recipe = n.recipe
     local crafts = NP.mode == "levelling" and n.crafts or 1
-    c.icon:SetTexture(recipe.item and ItemIcon(recipe.item)
-        or (C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(n.id)) or 134400)
-    c.iconButton.itemID = recipe.item
+    c.icon:SetTexture(NP.RecipeIcon(n.id, recipe))
+    c.iconButton.itemID = recipe.item or false
     c.name:SetText(recipe.name or "?")
     local quality = recipe.item and C_Item and C_Item.GetItemQualityByID and C_Item.GetItemQualityByID(recipe.item)
     local qc = quality and ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[quality]
@@ -4959,7 +5156,8 @@ function NP.DrawDetail(prof)
             or chance > 0 and string.format("%d%% a craft", math.floor(chance * 100 + 0.5)) or "|cff999999none|r") or "-"),
     }, "\n"))
     local can = CanMake(PB.view.char, recipe)
-    local mine = NP.IsMine() and not prof.unloaded and prof.recipes[n.id] ~= nil
+    local known = prof.recipes[n.id] ~= nil
+    local mine = NP.IsMine() and not prof.unloaded and known
     local count = NP.mode == "levelling" and math.min(can, crafts) or 1
     d.create:SetEnabled(mine and can > 0)
     d.create:SetText(NP.mode == "levelling" and count > 1 and string.format("Create %d", count) or "Create")
@@ -4968,72 +5166,258 @@ function NP.DrawDetail(prof)
     d.create.count, d.create.id = count, n.id
     d.createAll.count, d.createAll.id = can, n.id
     d.note:SetText(not NP.IsMine() and ("|cff999999Log in on|r " .. PB.DisplayName(PB.view.char) .. " |cff999999to create this.|r")
-        or (not prof.recipes[n.id] and "|cff999999Learn this recipe at the trainer first.|r") or "")
+        or (not known and "|cff999999Learn this recipe at the trainer first.|r") or "")
 end
 
--- ------------------------------------------------- gathering and fishing --
+-- ----------------------------------------------------------- Make money --
 
--- Session: gold per hour now, and what was gathered (the session is shared
--- by all gathering professions; Fishing also shows how many fish get away).
-function NP.BuildSession(parent)
-    local s = NP.Box(parent)
-    s:SetAllPoints()
+-- Every recipe of every character that sells for more than its materials
+-- cost at today's prices, best first. A recipe several characters know is
+-- listed once, with the one who can make most of it now.
+function NP.MoneyList()
+    local me = PB.CharacterKey()
+    local byId, list = {}, {}
+    for key, char in pairs(db.chars or {}) do
+        for profName, prof in pairs(char.professions or {}) do
+            for id, recipe in pairs(prof.recipes or {}) do
+                NP.Fill(id, recipe)
+                local e = byId[id]
+                if e == nil then
+                    e = false
+                    if recipe.item and recipe.reagents and #recipe.reagents > 0 and not recipe.noReagents then
+                        local cost, value, profit = CraftNumbers(recipe)
+                        if profit and profit > 0 then
+                            e = { id = id, recipe = recipe, cost = cost, value = value, profit = profit, makers = {} }
+                            list[#list + 1] = e
+                        end
+                    end
+                    byId[id] = e
+                end
+                if e then
+                    e.makers[#e.makers + 1] = { key = key, prof = profName, can = CanMake(key, recipe) }
+                end
+            end
+        end
+    end
+    for _, e in ipairs(list) do
+        table.sort(e.makers, function(a, b)
+            if a.can ~= b.can then return a.can > b.can end
+            if (a.key == me) ~= (b.key == me) then return a.key == me end
+            return a.key < b.key
+        end)
+        e.can = e.makers[1].can
+    end
+    table.sort(list, function(a, b)
+        if a.profit ~= b.profit then return a.profit > b.profit end
+        return (a.recipe.name or "") < (b.recipe.name or "")
+    end)
+    return list
+end
+
+function NP.DrawMoney()
+    NP.moneyAll = NP.MoneyList()
+    NP.DrawMoneyRows()
+end
+
+-- The rows on show: the list, less what the search and the switch leave out.
+function NP.DrawMoneyRows()
+    local m = NP.money
+    local search = m.search:GetText()
+    search = type(search) == "string" and search:lower() or ""
+    local list = {}
+    for _, e in ipairs(NP.moneyAll or {}) do
+        if (search == "" or (e.recipe.name or ""):lower():find(search, 1, true)) and (not db.moneyCanOnly or e.can > 0) then
+            list[#list + 1] = e
+        end
+    end
+    local maxOffset = math.max(0, #list - MONEY_ROWS)
+    NP.moneyOffset = math.max(0, math.min(NP.moneyOffset, maxOffset))
+    for i, r in ipairs(m.rows) do
+        local e = list[i + NP.moneyOffset]
+        if e then
+            local maker = e.makers[1]
+            r.entry = e
+            r.itemID = e.recipe.item or false
+            r.icon:SetTexture(NP.RecipeIcon(e.id, e.recipe))
+            r.name:SetText(e.recipe.name or "?")
+            r.who:SetText(PB.ClassColored(db.chars[maker.key], maker.key)
+                .. (#e.makers > 1 and string.format(" |cff999999+%d|r", #e.makers - 1) or ""))
+            r.cost:SetText(Money(e.cost))
+            r.value:SetText(Money(e.value))
+            r.profit:SetText("|cff7fd36b" .. Money(e.profit) .. "|r")
+            r.can:SetText(e.can > 0 and ("|cffffffff" .. e.can .. "|r") or "|cff666666-|r")
+            r:Show()
+        else
+            r:Hide()
+        end
+    end
+    NP.SetScroll(m.scroll, NP.moneyOffset, maxOffset, #list, MONEY_ROWS * ROW)
+    local hint
+    if not next(db.chars or {}) then
+        hint = "Nothing saved yet: open one of your professions once."
+    elseif #(NP.moneyAll or {}) == 0 then
+        hint = Auctionator and "No recipe earns at the prices Windfall knows. Scan the auction house with Auctionator; professions not read yet are left out."
+            or "Auctionator is not loaded, so there are no auction prices to compare."
+    elseif #list == 0 then
+        hint = db.moneyCanOnly and "Nothing here can be made from what your characters hold. Untick the switch to see everything."
+            or "No recipes match."
+    end
+    m.hint:SetText(hint or "")
+    m.count:SetText(#list > 0 and string.format("%d recipes that earn", #list) or "")
+end
+
+-- A row's recipe, on the Recipes tab of the character who makes it.
+function NP.OpenRecipe(e)
+    local maker = e.makers[1]
+    NP.search:SetText("") -- while still on Make money: no redraw yet
+    NP.collapsed[e.recipe.cat or "Recipes"] = nil
+    NP.mode, NP.offset, NP.selected, NP.reveal = "recipes", 0, e.id, true
+    PB.Choose(maker.key, maker.prof)
+end
+
+function NP.BuildMoney(parent)
+    local m = NP.Box(parent)
+    m:SetAllPoints()
+    m:Hide()
+    m.search = NP.Make("EditBox", "WindfallMoneySearch", m, "SearchBoxTemplate")
+    m.search:SetSize(220, 20)
+    m.search:SetPoint("TOPLEFT", 18, -12)
+    m.search:SetAutoFocus(false)
+    m.search:HookScript("OnTextChanged", function()
+        NP.moneyOffset = 0
+        if NP.mode == "money" and NP.moneyAll then NP.DrawMoneyRows() end
+    end)
+    local only = NP.Check(m, { label = "Only what can be made now",
+        get = function() return db.moneyCanOnly end,
+        set = function(value) db.moneyCanOnly = value NP.moneyOffset = 0 end,
+        after = function() if NP.moneyAll then NP.DrawMoneyRows() end end,
+        tip = "Leaves out recipes none of your characters has the materials for. Counts each character's own bags and bank." })
+    only:SetPoint("LEFT", m.search, "RIGHT", 14, 0)
+    m.count = NP.Text(m, "GameFontDisableSmall", "RIGHT")
+    m.count:SetPoint("TOPRIGHT", -18, -16)
+    local columns = { who = -330, cost = -240, value = -160, profit = -80, can = -22 }
+    local function Head(text, point, x)
+        local fs = NP.Text(m, "GameFontNormalSmall", point == "TOPLEFT" and "LEFT" or "RIGHT")
+        fs:SetPoint(point, x, -44)
+        fs:SetText(text)
+    end
+    Head("Recipe", "TOPLEFT", 16)
+    Head("Made by", "TOPRIGHT", columns.who)
+    Head("To craft", "TOPRIGHT", columns.cost)
+    Head("Sells for", "TOPRIGHT", columns.value)
+    Head("Profit", "TOPRIGHT", columns.profit)
+    Head("Can make", "TOPRIGHT", columns.can)
+    local body = CreateFrame("Frame", nil, m)
+    body:SetPoint("TOPLEFT", 8, -60)
+    body:SetPoint("TOPRIGHT", -8, -60)
+    body:SetHeight(MONEY_ROWS * ROW)
+    m.rows = {}
+    for i = 1, MONEY_ROWS do
+        local r = CreateFrame("Button", nil, body)
+        r:SetHeight(ROW)
+        r:SetPoint("TOPLEFT", 0, -(i - 1) * ROW)
+        r:SetPoint("TOPRIGHT", -10, -(i - 1) * ROW)
+        r.icon = r:CreateTexture(nil, "ARTWORK")
+        r.icon:SetSize(16, 16)
+        r.icon:SetPoint("LEFT", 8, 0)
+        r.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+        r.name = NP.Text(r)
+        r.name:SetPoint("LEFT", 30, 0)
+        r.name:SetPoint("RIGHT", columns.who - 100, 0)
+        -- the row ends 18 inside the box; the heads are placed from the box
+        for key, x in pairs(columns) do
+            r[key] = NP.Text(r, key == "who" and "GameFontHighlightSmall" or "GameFontHighlight", "RIGHT")
+            r[key]:SetPoint("RIGHT", x + 18, 0)
+        end
+        if i % 2 == 0 then
+            local stripe = r:CreateTexture(nil, "BACKGROUND")
+            stripe:SetAllPoints()
+            stripe:SetColorTexture(1, 1, 1, 0.03)
+        end
+        r:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
+        r:SetScript("OnClick", function(self) if self.entry then NP.OpenRecipe(self.entry) end end)
+        r:SetScript("OnEnter", function(self)
+            local e = self.entry
+            if not e then return end
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            if type(self.itemID) == "number" then GameTooltip:SetItemByID(self.itemID) else GameTooltip:AddLine(e.recipe.name or "?") end
+            GameTooltip:AddLine(" ")
+            for _, maker in ipairs(e.makers) do
+                GameTooltip:AddDoubleLine(PB.DisplayName(maker.key) .. " (" .. maker.prof .. ")",
+                    maker.can > 0 and ("can make " .. maker.can) or "no materials", 1, 1, 1, 0.7, 0.7, 0.7)
+            end
+            GameTooltip:AddLine("Click: open it in Recipes", 0.6, 0.6, 0.6)
+            GameTooltip:Show()
+        end)
+        r:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        m.rows[i] = r
+    end
+    m.scroll = NP.ScrollBar(body)
+    m.hint = m:CreateFontString(nil, "OVERLAY", "GameFontDisable")
+    m.hint:SetPoint("TOPLEFT", 18, -70)
+    m.hint:SetPoint("RIGHT", -18, 0)
+    m.hint:SetJustifyH("LEFT")
+    local foot = NP.Text(m, "GameFontDisableSmall")
+    foot:SetPoint("BOTTOMLEFT", 16, 12)
+    foot:SetText("Profit for one craft: what it sells for after the auction house cut, less its materials at the cheapest price known.")
+    NP.money = m
+end
+
+-- -------------------------------------------------------------- Farming --
+
+-- Gold per hour and what was looted on the left, the best zones on the
+-- right, node sparkles under them.
+function NP.BuildFarming(parent)
+    local f = CreateFrame("Frame", nil, parent)
+    f:SetAllPoints()
+    f:Hide()
+    local s = NP.Box(f)
+    s:SetPoint("TOPLEFT", 0, 0)
+    s:SetPoint("BOTTOMLEFT", 0, 0)
+    s:SetWidth(430)
     s.rate = s:CreateFontString(nil, "OVERLAY", "GameFontNormalHuge")
     s.rate:SetPoint("TOPLEFT", 16, -16)
-    s.time = s:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    s.time = NP.Text(s)
     s.time:SetPoint("TOPLEFT", s.rate, "BOTTOMLEFT", 0, -6)
-    s.total = s:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
+    s.total = NP.Text(s, "GameFontHighlightLarge", "RIGHT")
     s.total:SetPoint("TOPRIGHT", -16, -18)
-    s.where = s:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    s.where = NP.Text(s, "GameFontDisableSmall", "RIGHT")
     s.where:SetPoint("TOPRIGHT", s.total, "BOTTOMRIGHT", 0, -6)
-    s.skills = s:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    s.skills:SetPoint("TOPLEFT", s.time, "TOPRIGHT", 24, 0)
     local line = s:CreateTexture(nil, "ARTWORK")
     line:SetPoint("TOPLEFT", 12, -68)
     line:SetPoint("TOPRIGHT", -12, -68)
     line:SetHeight(1)
     line:SetColorTexture(0.6, 0.5, 0.3, 0.6)
-    local function Head(text, point, x)
-        local fs = s:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        fs:SetPoint(point, x, -76)
+    local function Head(box, text, point, x, y)
+        local fs = NP.Text(box, "GameFontNormalSmall", point == "TOPLEFT" and "LEFT" or "RIGHT")
+        fs:SetPoint(point, x, y)
         fs:SetText(text)
     end
-    Head("Gathered", "TOPLEFT", 16)
-    Head("Each", "TOPRIGHT", -130)
-    Head("Value", "TOPRIGHT", -16)
+    Head(s, "Looted", "TOPLEFT", 16, -76)
+    Head(s, "Each", "TOPRIGHT", -110, -76)
+    Head(s, "Value", "TOPRIGHT", -16, -76)
     s.rows = {}
     for i = 1, SESSION_ROWS do
         local r = CreateFrame("Button", nil, s)
         r:SetHeight(ROW)
         r:SetPoint("TOPLEFT", 10, -92 - (i - 1) * ROW)
         r:SetPoint("TOPRIGHT", -10, -92 - (i - 1) * ROW)
-        r.name = r:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        r.name = NP.Text(r)
         r.name:SetPoint("LEFT", 6, 0)
-        r.name:SetPoint("RIGHT", -230, 0)
-        r.name:SetJustifyH("LEFT")
-        r.name:SetWordWrap(false)
-        r.each = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        r.each:SetPoint("RIGHT", -120, 0)
-        r.value = r:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        r.name:SetPoint("RIGHT", -190, 0)
+        r.each = NP.Text(r, "GameFontHighlightSmall", "RIGHT")
+        r.each:SetPoint("RIGHT", -100, 0)
+        r.value = NP.Text(r, "GameFontHighlight", "RIGHT")
         r.value:SetPoint("RIGHT", -6, 0)
         if i % 2 == 0 then
             local stripe = r:CreateTexture(nil, "BACKGROUND")
             stripe:SetAllPoints()
             stripe:SetColorTexture(1, 1, 1, 0.03)
         end
-        r:SetScript("OnEnter", function(self)
-            if self.itemID and self.itemID > 0 then
-                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                GameTooltip:SetItemByID(self.itemID)
-                GameTooltip:Show()
-            end
-        end)
-        r:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        NP.ItemTooltip(r)
         s.rows[i] = r
     end
     s.hint = s:CreateFontString(nil, "OVERLAY", "GameFontDisable")
-    s.hint:SetPoint("LEFT", 16, 0)
-    s.hint:SetPoint("RIGHT", -16, 0)
     s.hint:SetJustifyH("LEFT")
     s.toggle = NP.Button(s, "Start", 80)
     s.toggle:SetPoint("BOTTOMLEFT", 10, 10)
@@ -5049,48 +5433,61 @@ function NP.BuildSession(parent)
     s.reset:SetPoint("LEFT", s.view, "RIGHT", 6, 0)
     s.reset:SetScript("OnClick", function() Reset(IsShiftKeyDown and IsShiftKeyDown()) end)
     NP.Tooltip(s.reset, "Reset", "Saves this session to the zone history and starts a new one. Shift-click: throw it away instead.")
-    -- Node sparkles, each kind on its own.
+    s.skills = NP.Text(s, "GameFontHighlightSmall", "RIGHT")
+    s.skills:SetPoint("BOTTOMRIGHT", -14, 16)
+    f.session = s
+
+    local z = NP.Box(f)
+    z:SetPoint("TOPLEFT", s, "TOPRIGHT", 8, 0)
+    z:SetPoint("BOTTOMRIGHT", 0, 0)
+    z.title = z:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    z.title:SetPoint("TOPLEFT", 16, -16)
+    Head(z, "Zone", "TOPLEFT", 16, -50)
+    Head(z, "Per hour", "TOPRIGHT", -70, -50)
+    Head(z, "Time", "TOPRIGHT", -16, -50)
+    z.rows = {}
+    for i = 1, ZONE_ROWS do
+        local y = -68 - (i - 1) * ROW
+        local row = {}
+        row.zone = NP.Text(z)
+        row.zone:SetPoint("TOPLEFT", 16, y)
+        row.zone:SetPoint("RIGHT", z, "RIGHT", -150, 0)
+        row.rate = NP.Text(z, "GameFontHighlight", "RIGHT")
+        row.rate:SetPoint("TOPRIGHT", -70, y)
+        row.time = NP.Text(z, "GameFontHighlightSmall", "RIGHT")
+        row.time:SetPoint("TOPRIGHT", -16, y - 1)
+        z.rows[i] = row
+    end
+    z.hint = z:CreateFontString(nil, "OVERLAY", "GameFontDisable")
+    z.hint:SetJustifyH("LEFT")
+    -- node sparkles, each kind on its own
     local y = 10
     for i = #SPARKLES, 1, -1 do
-        local key, label = SPARKLES[i][1], SPARKLES[i][2]
-        local c = NP.Check(s, { label = label,
-            get = function() return db.sparkle and db[key] ~= false end,
-            set = function(value)
-                db[key] = value
-                if value and not db.sparkle then
-                    db.sparkle = true
-                    ApplySparkles()
-                end
-                SparkleRecheck()
-                if UpdateBarIcons then UpdateBarIcons() end
-            end,
-            tip = "The nearest one close by that you can gather gets a sparkle and the game's gather icon. The game only picks up nodes within about 15 yards." })
-        c:SetPoint("BOTTOMLEFT", s, "BOTTOMRIGHT", -150, y)
+        local c = NP.SparkleCheck(z, SPARKLES[i][1], SPARKLES[i][2])
+        c:SetPoint("BOTTOMLEFT", 12, y)
         y = y + 24
     end
-    local head = s:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    head:SetPoint("BOTTOMLEFT", s, "BOTTOMRIGHT", -146, y + 2)
+    local head = z:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    head:SetPoint("BOTTOMLEFT", 16, y + 4)
     head:SetText("Node sparkles")
-    NP.session = s
+    z.clear = NP.Button(z, "Clear zones", 100)
+    z.clear:SetPoint("BOTTOMRIGHT", -10, 10)
+    z.clear:SetScript("OnClick", function()
+        if StaticPopup_Show then StaticPopup_Show("WINDFALL_CLEAR_HISTORY") end
+    end)
+    NP.Tooltip(z.clear, "Clear zones", "Deletes the saved zone history.")
+    f.zones = z
+    NP.farming = f
 end
 
-function NP.DrawSession()
-    local s = NP.session
+function NP.DrawFarming()
+    local s, z = NP.farming.session, NP.farming.zones
     local list, total, unpriced = ns.SessionList(SESSION_ROWS)
     local elapsed = db.elapsed or 0
     s.rate:SetText(elapsed >= 30 and (Money(total / elapsed * 3600) .. " |cffaaaaaa/ hour|r") or "|cffaaaaaa-- / hour|r")
     s.time:SetText(MODE_LABEL[db.mode] .. "  " .. Clock(elapsed) .. (running and "" or "  |cffff8040paused|r"))
     s.total:SetText("Total " .. Money(total))
     s.where:SetText(ZoneName())
-    -- the gathering skills of the character shown
-    local char = (db.chars or {})[PB.view.char]
-    local parts = {}
-    for _, line in ipairs(GATHER_ORDER) do
-        for name, g in pairs(char and char.gathering or {}) do
-            if g.line == line then parts[#parts + 1] = string.format("|cffffd100%s|r %d/%d", name, g.skill or 0, g.max or 0) end
-        end
-    end
-    s.skills:SetText(table.concat(parts, "   "))
     for i, r in ipairs(s.rows) do
         local e = list[i]
         if e then
@@ -5114,86 +5511,51 @@ function NP.DrawSession()
     end
     s.hint:ClearAllPoints()
     s.hint:SetPoint("TOPLEFT", 16, -96 - #list * ROW)
-    s.hint:SetPoint("RIGHT", -170, 0)
+    s.hint:SetPoint("RIGHT", -16, 0)
     s.hint:SetText(hint or "")
     s.toggle:SetText(running and "Pause" or "Start")
     s.view:SetText(MODE_LABEL[db.mode])
-end
-
-function NP.BuildZones(parent)
-    local z = NP.Box(parent)
-    z:SetAllPoints()
-    local function Columns(template, y)
-        local row = {}
-        row.zone = z:CreateFontString(nil, "OVERLAY", template)
-        row.zone:SetPoint("TOPLEFT", 16, y)
-        row.zone:SetPoint("RIGHT", z, "RIGHT", -300, 0)
-        row.zone:SetJustifyH("LEFT")
-        row.zone:SetWordWrap(false)
-        row.rate = z:CreateFontString(nil, "OVERLAY", template)
-        row.rate:SetPoint("TOPRIGHT", -170, y)
-        row.time = z:CreateFontString(nil, "OVERLAY", template)
-        row.time:SetPoint("TOPRIGHT", -80, y)
-        row.runs = z:CreateFontString(nil, "OVERLAY", template)
-        row.runs:SetPoint("TOPRIGHT", -16, y)
-        return row
+    -- this character's gathering skills
+    local char = (db.chars or {})[PB.CharacterKey()]
+    local parts = {}
+    for _, line in ipairs(GATHER_ORDER) do
+        for name, g in pairs(char and char.gathering or {}) do
+            if g.line == line then parts[#parts + 1] = string.format("|cffffd100%s|r %d", name, g.skill or 0) end
+        end
     end
-    z.title = z:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    z.title:SetPoint("TOPLEFT", 16, -16)
-    local head = Columns("GameFontNormalSmall", -50)
-    head.zone:SetText("Zone")
-    head.rate:SetText("Per hour")
-    head.time:SetText("Time")
-    head.runs:SetText("Runs")
-    z.rows = {}
-    for i = 1, ZONE_ROWS do
-        z.rows[i] = Columns("GameFontHighlight", -68 - (i - 1) * ROW)
-    end
-    z.hint = z:CreateFontString(nil, "OVERLAY", "GameFontDisable")
-    z.hint:SetJustifyH("LEFT")
-    z.view = NP.Button(z, MODE_LABEL.gather, 96)
-    z.view:SetPoint("BOTTOMLEFT", 10, 10)
-    z.view:SetScript("OnClick", function() SetMode() end)
-    z.clear = NP.Button(z, "Clear history", 110)
-    z.clear:SetPoint("BOTTOMRIGHT", -10, 10)
-    z.clear:SetScript("OnClick", function()
-        if StaticPopup_Show then StaticPopup_Show("WINDFALL_CLEAR_HISTORY") end
-    end)
-    NP.zones = z
-end
+    s.skills:SetText(table.concat(parts, "  "))
 
-function NP.DrawZones()
-    local z = NP.zones
-    local list = ns.ZoneList(db.mode)
+    local zones = ns.ZoneList(db.mode)
     local here = ZoneName()
-    z.title:SetText("Best zones - " .. MODE_LABEL[db.mode])
+    z.title:SetText("Best zones")
     for i, row in ipairs(z.rows) do
-        local e = list[i]
+        local e = zones[i]
         if e then
             row.zone:SetText((e.zone == here and "|cff7fd36b" or "|cffffffff") .. e.zone .. "|r")
             row.rate:SetText(Money(e.rate))
             row.time:SetText(ShortTime(e.time))
-            row.runs:SetText(e.runs)
         else
-            row.zone:SetText("") row.rate:SetText("") row.time:SetText("") row.runs:SetText("")
+            row.zone:SetText("") row.rate:SetText("") row.time:SetText("")
         end
     end
-    local hint
-    if #list == 0 then
-        hint = "Nothing yet. A zone shows up after a minute of farming there; Reset saves the session."
-    elseif #list > ZONE_ROWS then
-        hint = "+ " .. (#list - ZONE_ROWS) .. " more zones with a lower rate."
+    local zoneHint
+    if #zones == 0 then
+        zoneHint = "A zone shows up after a minute of farming there. Reset saves the session."
+    elseif #zones > ZONE_ROWS then
+        zoneHint = "+ " .. (#zones - ZONE_ROWS) .. " more with a lower rate."
     end
     z.hint:ClearAllPoints()
-    z.hint:SetPoint("TOPLEFT", 16, -72 - math.min(#list, ZONE_ROWS) * ROW)
-    z.hint:SetText(hint or "")
-    z.view:SetText(MODE_LABEL[db.mode])
+    z.hint:SetPoint("TOPLEFT", 16, -72 - math.min(#zones, ZONE_ROWS) * ROW)
+    z.hint:SetPoint("RIGHT", -16, 0)
+    z.hint:SetText(zoneHint or "")
 end
 
--- Fishing: the fishing key and what it does.
+-- -------------------------------------------------------------- Fishing --
+
 function NP.BuildFishing(parent)
     local f = NP.Box(parent)
     f:SetAllPoints()
+    f:Hide()
     local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     title:SetPoint("TOPLEFT", 16, -16)
     title:SetText("Fishing key")
@@ -5206,10 +5568,10 @@ function NP.BuildFishing(parent)
     local on = NP.Check(f, NP.Setting("Fishing key on"))
     on:SetPoint("TOPLEFT", 14, y)
     NP.keyButton = NP.Button(f, "Key", 170)
-    NP.keyButton:SetPoint("TOPRIGHT", -16, y)
+    NP.keyButton:SetPoint("TOPLEFT", 240, y)
     NP.keyButton:SetScript("OnClick", function() StartKeyCapture() end)
     NP.Tooltip(NP.keyButton, "Fishing key", "Click, then press the key or mouse button to use.")
-    y = y - 34
+    y = y - 38
     local head = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     head:SetPoint("TOPLEFT", 16, y)
     head:SetText("With the key on")
@@ -5222,26 +5584,15 @@ function NP.BuildFishing(parent)
             y = y - 26
         end
     end
-    y = y - 10
+    y = y - 12
     head = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     head:SetPoint("TOPLEFT", 16, y)
-    head:SetText("Here")
+    head:SetText("Where you are")
     f.getaway = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     f.getaway:SetPoint("TOPLEFT", 16, y - 22)
     f.getaway:SetPoint("RIGHT", -16, 0)
     f.getaway:SetJustifyH("LEFT")
-    local pools = NP.Check(f, { label = "Sparkle on the nearest fishing pool",
-        get = function() return db.sparkle and db.sparkleFish ~= false end,
-        set = function(value)
-            db.sparkleFish = value
-            if value and not db.sparkle then
-                db.sparkle = true
-                ApplySparkles()
-            end
-            SparkleRecheck()
-            if UpdateBarIcons then UpdateBarIcons() end
-        end,
-        tip = "The nearest fishing pool close by gets a sparkle. The game only picks up pools within about 15 yards." })
+    local pools = NP.SparkleCheck(f, "sparkleFish", "Sparkle on the nearest fishing pool")
     pools:SetPoint("TOPLEFT", 14, y - 48)
     NP.fishing = f
 end
@@ -5250,7 +5601,7 @@ function NP.DrawFishing()
     NP.fishing.getaway:SetText(GetawayText() or "|cff999999How many fish get away shows once you have fished here.|r")
 end
 
--- The gear in the header: settings that belong to no profession.
+-- The gear in the header: settings that belong to no tab.
 function NP.BuildGear(h)
     local gear = CreateFrame("Button", nil, h)
     gear:SetSize(22, 22)
@@ -5261,6 +5612,7 @@ function NP.BuildGear(h)
     local menu = NP.Make("Frame", nil, NP.page, "BackdropTemplate")
     menu:Hide()
     menu:SetFrameStrata("DIALOG")
+    menu:EnableMouse(true)
     menu:SetPoint("TOPRIGHT", gear, "BOTTOMRIGHT", 0, -4)
     menu:SetSize(380, 112)
     if menu.SetBackdrop then
@@ -5282,21 +5634,11 @@ function NP.BuildGear(h)
         NP.RefreshChecks()
         menu:SetShown(not menu:IsShown())
     end)
-    NP.page:HookScript("OnHide", function() menu:Hide() end)
     NP.gearMenu = menu
     h.gear = gear
 end
 
-function NP.BuildGather(page)
-    local g = CreateFrame("Frame", nil, page)
-    g:SetPoint("TOPLEFT", 12, -44)
-    g:SetPoint("BOTTOMRIGHT", -12, 12)
-    g:Hide()
-    NP.gpage = g
-    NP.BuildSession(g)
-    NP.BuildZones(g)
-    NP.BuildFishing(g)
-end
+-- ---------------------------------------------------------------- build --
 
 function NP.Build(book)
     NP.book = book
@@ -5304,7 +5646,11 @@ function NP.Build(book)
     page:Hide()
     page:SetPoint("TOPLEFT", book, "TOPLEFT", 4, -22)
     page:SetPoint("BOTTOMRIGHT", book, "BOTTOMRIGHT", -4, 4)
-    page:SetFrameLevel(math.min((book:GetFrameLevel() or 1) + 200, 9000))
+    -- above the game's pages, below its border and portrait
+    local container = NP.Part(book, "PortraitContainer")
+    local level = (book:GetFrameLevel() or 1) + 200
+    if container then level = math.max(level, (container:GetFrameLevel() or 0) - 10) end
+    page:SetFrameLevel(math.min(level, 9000))
     page:EnableMouse(true)
     page:EnableMouseWheel(true)
     page:SetScript("OnMouseWheel", function(_, delta) NP.Scroll(delta) end)
@@ -5314,7 +5660,7 @@ function NP.Build(book)
     NP.page = page
     page.NP = NP
 
-    -- Title and portrait: the profession and character shown.
+    -- Title and portrait: what the page shows, over the window's own.
     local titleBox = NP.Part(book, "TitleContainer")
     if titleBox then
         local title = CreateFrame("Frame", nil, page)
@@ -5327,7 +5673,6 @@ function NP.Build(book)
         NP.titleText = title:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         NP.titleText:SetPoint("CENTER", 0, 0)
     end
-    local container = NP.Part(book, "PortraitContainer")
     if container and NP.Part(container, "portrait") then
         local portrait = CreateFrame("Frame", nil, page)
         portrait:SetAllPoints(container)
@@ -5342,20 +5687,24 @@ function NP.Build(book)
         end
     end
 
-    -- Header: the character (click for the others), its professions, the skill bar, settings.
+    -- Header: on Recipes and Levelling the character (click for every
+    -- character's professions), its professions and the skill bar; on the
+    -- other tabs their name. The gear is always there.
     local h = CreateFrame("Frame", nil, page)
     h:SetPoint("TOPLEFT", 58, -8)
     h:SetPoint("TOPRIGHT", -14, -8)
     h:SetHeight(30)
+    h.caption = h:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    h.caption:SetPoint("LEFT", 4, 0)
     h.char = NP.Make("Button", nil, h, "UIPanelButtonTemplate")
     h.char:SetSize(170, 24)
     h.char:SetPoint("LEFT", 0, 0)
-    h.char:SetScript("OnClick", function(self) PB.ToggleCharMenu(self) end)
+    h.char:SetScript("OnClick", function(self) NP.ToggleMenu(self) end)
     local arrow = h.char:CreateTexture(nil, "OVERLAY")
     arrow:SetSize(14, 14)
     arrow:SetPoint("RIGHT", -6, -1)
     if not NP.Atlas(arrow, "friendslist-categorybutton-arrow-down") then arrow:SetTexture("Interface\\Buttons\\Arrow-Down-Up") end
-    NP.Tooltip(h.char, "Characters", "Pick any of your characters to see their professions.", "ANCHOR_BOTTOM")
+    NP.Tooltip(h.char, "Characters", "Every character's professions. Pick one to see it.", "ANCHOR_BOTTOM")
     h.icons = {}
     for i = 1, 8 do
         local b = CreateFrame("Button", nil, h)
@@ -5377,23 +5726,15 @@ function NP.Build(book)
         b:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
         b:SetScript("OnClick", function(self)
             NP.offset, NP.selected = 0, nil
-            if self.special then
-                NP.special, NP.mode = self.special, nil
-                NP.Refresh()
-            else
-                NP.special = nil
-                PB.Choose(PB.view.char, self.name)
-            end
+            PB.Choose(PB.view.char, self.name)
         end)
         b:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
             GameTooltip:AddLine(self.name)
             local p = self.prof
-            if self.special == "farm" then
-                GameTooltip:AddLine("Gold per hour, your best zones and node sparkles.", 1, 1, 1, true)
-            elseif p then
+            if type(p) == "table" then
                 GameTooltip:AddLine(string.format("%d / %d", p.skill or 0, p.max or 0), 1, 1, 1)
-                if p.unloaded then GameTooltip:AddLine("Not read yet: open it once on this character.", 0.6, 0.6, 0.6, true) end
+                if p.unloaded then GameTooltip:AddLine("Recipes not read yet.", 0.6, 0.6, 0.6, true) end
             end
             GameTooltip:Show()
         end)
@@ -5419,40 +5760,71 @@ function NP.Build(book)
     h.barFrame = barFrame
     NP.header = h
 
-    -- Left: search and the list, with its scroll bar.
-    NP.search = NP.Make("EditBox", "WindfallProfessionSearch", page, "SearchBoxTemplate")
+    -- The body under the header: one view per tab.
+    local body = CreateFrame("Frame", nil, page)
+    body:SetPoint("TOPLEFT", 12, -44)
+    body:SetPoint("BOTTOMRIGHT", -12, 12)
+
+    -- Recipes and Levelling: the list on the left, the recipe on the right.
+    local craft = CreateFrame("Frame", nil, body)
+    craft:SetAllPoints()
+    NP.craft = craft
+    NP.search = NP.Make("EditBox", "WindfallProfessionSearch", craft, "SearchBoxTemplate")
     NP.search:SetSize(LIST_W - 6, 20)
-    NP.search:SetPoint("TOPLEFT", 20, -48)
+    NP.search:SetPoint("TOPLEFT", 8, -4)
     NP.search:SetAutoFocus(false)
-    NP.search:HookScript("OnTextChanged", function() NP.offset = 0 NP.Refresh() end)
-    local listBox = NP.Box(page)
-    listBox:SetPoint("TOPLEFT", 12, -74)
-    listBox:SetPoint("BOTTOMLEFT", 12, 12)
+    NP.search:HookScript("OnTextChanged", function()
+        NP.offset = 0
+        if NP.mode == "recipes" then NP.Refresh() end
+    end)
+    local listBox = NP.Box(craft)
+    listBox:SetPoint("TOPLEFT", 0, -30)
+    listBox:SetPoint("BOTTOMLEFT", 0, 0)
     listBox:SetWidth(LIST_W + 8)
     NP.listBox = listBox
     NP.list = CreateFrame("Frame", nil, listBox)
     NP.list:SetPoint("TOPLEFT", 5, -6)
     NP.list:SetPoint("BOTTOMRIGHT", -5, 6)
     NP.headerPool, NP.rowPool = {}, {}
-    local s = CreateFrame("Frame", nil, NP.list)
-    s:SetPoint("TOPRIGHT", 0, 0)
-    s:SetPoint("BOTTOMRIGHT", 0, 0)
-    s:SetWidth(6)
-    local track = s:CreateTexture(nil, "BACKGROUND")
-    track:SetAllPoints()
-    track:SetColorTexture(0, 0, 0, 0.5)
-    s.thumb = s:CreateTexture(nil, "ARTWORK")
-    s.thumb:SetWidth(6)
-    s.thumb:SetColorTexture(0.75, 0.6, 0.3, 0.9)
-    NP.scroll = s
+    NP.scroll = NP.ScrollBar(NP.list)
+    -- Levelling: under the route
+    NP.plan = NP.Button(listBox, "Plan", 110)
+    NP.plan:SetPoint("BOTTOMLEFT", 8, 8)
+    NP.plan:SetScript("OnClick", function()
+        local _, prof = NP.Selection()
+        if not prof then return end
+        PB.view.target = NP.NextTarget(prof)
+        NP.offset, NP.selected = 0, nil
+        NP.Refresh()
+    end)
+    NP.Tooltip(NP.plan, "How far to plan", "The route goes to your next skill cap. Click to plan to the cap after it.")
+    NP.shop = NP.Button(listBox, "Shopping list", 120)
+    NP.shop:SetPoint("BOTTOMRIGHT", -8, 8)
+    NP.shop:SetScript("OnClick", function()
+        if PageOpeners.route then PageOpeners.route() end
+        DockPanel(book, true)
+        -- past the side tabs
+        local panel = _G.WindfallPanel
+        if panel then
+            panel:ClearAllPoints()
+            panel:SetPoint("TOPLEFT", book, "TOPRIGHT", 52, 0)
+        end
+    end)
+    NP.Tooltip(NP.shop, "Shopping list", "Every material for the route, with Show at the auction house and Buy at vendors. It moves next to the auction house or a vendor when you visit one.")
 
-    -- Right: the recipe, like the game's own.
-    local d = NP.Box(page)
-    d:SetPoint("TOPLEFT", listBox, "TOPRIGHT", 8, 34)
-    d:SetPoint("BOTTOMRIGHT", -12, 12)
+    local d = NP.Box(craft)
+    d:SetPoint("TOPLEFT", LIST_W + 16, 0)
+    d:SetPoint("BOTTOMRIGHT", 0, 0)
     d.empty = d:CreateFontString(nil, "OVERLAY", "GameFontDisable")
-    d.empty:SetPoint("CENTER")
-    d.empty:SetWidth(240)
+    d.empty:SetPoint("CENTER", 0, 20)
+    d.empty:SetWidth(280)
+    d.load = NP.Button(d, "Read its recipes", 140)
+    d.load:SetPoint("TOP", d.empty, "BOTTOM", 0, -12)
+    d.load:SetScript("OnClick", function()
+        local _, prof = NP.Selection()
+        if prof and prof.line and NP.IsMine() then NP.OpenProfession(prof.line) end
+    end)
+    NP.Tooltip(d.load, "Read its recipes", "Opens this profession once so Windfall can read its recipes.")
     local c = CreateFrame("Frame", nil, d)
     c:SetPoint("TOPLEFT", 14, -14)
     c:SetPoint("BOTTOMRIGHT", -14, 44)
@@ -5467,23 +5839,13 @@ function NP.Build(book)
     iconBorder:SetPoint("BOTTOMRIGHT", 1, -1)
     iconBorder:SetTexture("Interface\\Buttons\\UI-Quickslot2")
     iconBorder:SetTexCoord(0.2, 0.8, 0.2, 0.8)
-    c.iconButton:SetScript("OnEnter", function(self)
-        if self.itemID then
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetItemByID(self.itemID)
-            GameTooltip:Show()
-        end
-    end)
-    c.iconButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    c.name = c:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    NP.ItemTooltip(c.iconButton)
+    c.name = NP.Text(c, "GameFontNormalLarge")
     c.name:SetPoint("TOPLEFT", c.iconButton, "TOPRIGHT", 12, -4)
     c.name:SetPoint("RIGHT", c, "RIGHT", 0, 0)
-    c.name:SetJustifyH("LEFT")
-    c.name:SetWordWrap(false)
-    c.desc = c:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    c.desc = NP.Text(c, "GameFontHighlightSmall")
     c.desc:SetPoint("TOPLEFT", c.name, "BOTTOMLEFT", 0, -6)
     c.desc:SetPoint("RIGHT", c, "RIGHT", 0, 0)
-    c.desc:SetJustifyH("LEFT")
     c.reagentHead = c:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     c.reagentHead:SetPoint("TOPLEFT", c.iconButton, "BOTTOMLEFT", 0, -18)
     c.tiles = {}
@@ -5491,7 +5853,7 @@ function NP.Build(book)
         local t = CreateFrame("Button", nil, c)
         t:SetSize(34, 34)
         local col, row = (i - 1) % 2, math.floor((i - 1) / 2)
-        t:SetPoint("TOPLEFT", c.reagentHead, "BOTTOMLEFT", col * 152, -8 - row * 44)
+        t:SetPoint("TOPLEFT", c.reagentHead, "BOTTOMLEFT", col * 186, -8 - row * 44)
         t.icon = t:CreateTexture(nil, "ARTWORK")
         t.icon:SetAllPoints()
         t.border = t:CreateTexture(nil, "OVERLAY")
@@ -5501,34 +5863,22 @@ function NP.Build(book)
         t.border:SetTexCoord(0.2, 0.8, 0.2, 0.8)
         t.count = t:CreateFontString(nil, "OVERLAY", "NumberFontNormalSmall")
         t.count:SetPoint("BOTTOMRIGHT", -1, 2)
-        t.text = t:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        t.text = NP.Text(t, "GameFontHighlightSmall")
         t.text:SetPoint("TOPLEFT", t, "TOPRIGHT", 6, -3)
-        t.text:SetWidth(108)
-        t.text:SetJustifyH("LEFT")
-        t.text:SetWordWrap(false)
-        t.alts = t:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        t.text:SetWidth(140)
+        t.alts = NP.Text(t, "GameFontDisableSmall")
         t.alts:SetPoint("TOPLEFT", t.text, "BOTTOMLEFT", 0, -3)
-        t.alts:SetWidth(108)
-        t.alts:SetJustifyH("LEFT")
-        t.alts:SetWordWrap(false)
-        t:SetScript("OnEnter", function(self)
-            if self.itemID then
-                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                GameTooltip:SetItemByID(self.itemID)
-                GameTooltip:Show()
-            end
-        end)
-        t:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        t.alts:SetWidth(140)
+        NP.ItemTooltip(t)
         c.tiles[i] = t
     end
     c.costs = c:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     c.costs:SetPoint("BOTTOMLEFT", 0, 18)
     c.costs:SetJustifyH("LEFT")
     c.costs:SetSpacing(4)
-    d.note = d:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    d.note = NP.Text(d, "GameFontHighlightSmall", "RIGHT")
     d.note:SetPoint("BOTTOMLEFT", 14, 40)
     d.note:SetPoint("BOTTOMRIGHT", -14, 40)
-    d.note:SetJustifyH("RIGHT")
     d.createAll = NP.Button(d, "Create All", 124)
     d.createAll:SetPoint("BOTTOMLEFT", 10, 10)
     d.createAll:SetScript("OnClick", function(self) NP.Craft(self.id, self.count) end)
@@ -5537,28 +5887,16 @@ function NP.Build(book)
     d.create:SetScript("OnClick", function(self) NP.Craft(self.id, self.count) end)
     NP.detail = d
 
-    -- Levelling: the shopping list (with Show and Buy), next to this window.
-    NP.shop = NP.Button(d, "Shopping list", 120)
-    NP.shop:SetPoint("BOTTOM", 0, 10)
-    NP.shop:SetScript("OnClick", function()
-        if PageOpeners.route then PageOpeners.route() end
-        DockPanel(book, true)
-        -- past the side tabs
-        local panel = _G.WindfallPanel
-        if panel then
-            panel:ClearAllPoints()
-            panel:SetPoint("TOPLEFT", book, "TOPRIGHT", 52, 0)
-        end
-    end)
-    NP.Tooltip(NP.shop, "Shopping list", "Every material for the route, with Show at the auction house and Buy at vendors. It moves next to the auction house or a vendor when you visit one.")
+    NP.BuildMoney(body)
+    NP.BuildFarming(body)
+    NP.BuildFishing(body)
 
-    NP.BuildGather(page)
-
-    -- The views: tabs under the window, like the game's own.
+    -- The tabs under the window, like the game's own; always the same ones.
     NP.modeTabs = {}
-    for i = 1, 3 do
+    for i, m in ipairs(TABS) do
         local b = NP.Make("Button", "WindfallProfessionPageTab" .. i, page, "PanelTabButtonTemplate")
         b:SetID(i)
+        b.key = m.key
         local art = NP.Part(b, "Left") or NP.Part(b, "LeftActive")
         if not art then
             b:SetSize(100, 26)
@@ -5572,21 +5910,28 @@ function NP.Build(book)
             end
         end
         NP.tabArt = art ~= nil
+        b:SetText(m.label)
+        if art and PanelTemplates_TabResize then pcall(PanelTemplates_TabResize, b, 0) end
         if i == 1 then
             b:SetPoint("TOPLEFT", book, "BOTTOMLEFT", 12, art and 2 or -2)
         else
             b:SetPoint("TOPLEFT", NP.modeTabs[i - 1], "TOPRIGHT", (not art or NP.Part(b, "LeftActive")) and 3 or -15, 0)
         end
         b:SetScript("OnClick", function(self)
-            NP.mode, NP.offset, NP.selected = self.key, 0, nil
             if SOUNDKIT and SOUNDKIT.IG_CHARACTER_INFO_TAB then PlaySound(SOUNDKIT.IG_CHARACTER_INFO_TAB) end
-            NP.Refresh()
+            NP.SetMode(self.key)
         end)
         NP.modeTabs[i] = b
     end
+
+    page:HookScript("OnHide", function()
+        NP.gearMenu:Hide()
+        if NP.menu then NP.menu:Hide() end
+    end)
 end
 
--- The side tab, with the profession tabs on the window's right.
+-- --------------------------------------------------------- the side tab --
+
 function NP.Attach()
     local book = _G.ProfessionsFrame
     if NP.attached or not book then return end
@@ -5604,7 +5949,7 @@ function NP.Attach()
     NP.tab = tab
     NP.Build(book)
 
-    -- Before a tab of the game's (or another addon's) is clicked, its content comes back.
+    -- Any other side tab (the game's, another addon's) takes the window back.
     local function Leave() NP.SetActive(false) end
     function NP.HookTab(t)
         if t and t ~= tab and t.HookScript and not NP.hooked[t] then
@@ -5629,31 +5974,28 @@ function NP.Attach()
         end
     end
 
-    -- follow: open on the profession the window shows, for the character you are on.
-    function NP.SetActive(active, follow)
+    -- Shows or leaves Windfall's page. It opens on the character you are on,
+    -- with the profession the window has open picked.
+    function NP.SetActive(active)
         if not active and not NP.active then return end
         local fresh = active and not NP.active
         NP.active = active
         if tab.SetChecked then pcall(tab.SetChecked, tab, active) end
         if not active then
             NP.page:Hide()
-            NP.Uncover()
+            NP.Unquiet()
             return
         end
         NP.page:Show()
-        if fresh then NP.Home() end
-        if follow then
+        NP.rescan = true
+        if fresh then
+            NP.Home()
             local T = C_TradeSkillUI
             local base = T and T.IsTradeSkillReady and T.IsTradeSkillReady() and T.GetBaseProfessionInfo and T.GetBaseProfessionInfo()
             local line = base and SkillLineOf(base)
             local me = line and db.chars and db.chars[PB.CharacterKey()]
             for name, p in pairs(me and me.professions or {}) do
-                if p.line == line then
-                    NP.offset, NP.selected = 0, nil
-                    NP.special = line == FISHING_LINE and "fish" or nil
-                    PB.Choose(PB.CharacterKey(), name)
-                    return
-                end
+                if p.line == line then PB.view.prof = name end
             end
         end
         NP.Refresh()
@@ -5662,24 +6004,22 @@ function NP.Attach()
     local function Clicked(_, button, upInside)
         if upInside == false or (button and button ~= "LeftButton") then return end
         if SOUNDKIT and SOUNDKIT.IG_CHARACTER_INFO_TAB then PlaySound(SOUNDKIT.IG_CHARACTER_INFO_TAB) end
-        if NP.active then NP.SetActive(false) else NP.SetActive(true, true) end
+        NP.SetActive(not NP.active)
     end
     if NP.Part(tab, "Icon") and tab:GetName() == "WindfallProfessionTab" and type(tab.SetCustomOnMouseUpHandler) == "function" then
         tab:SetCustomOnMouseUpHandler(Clicked)
     else
         tab:SetScript("OnMouseUp", function(self, button) Clicked(self, button, true) end)
     end
-    NP.Tooltip(tab, "Windfall", "All your characters' professions: recipes, levelling, gathering and fishing.")
+    NP.Tooltip(tab, "Windfall", "Every character's professions, levelling routes, what earns gold, farming and fishing.")
 
     book:HookScript("OnShow", function()
         C_Timer.After(0, NP.Place)
         tab:Show()
-        if NP.wantView then
-            local view = NP.wantView
-            NP.wantView = nil
+        local view = NP.wantView
+        NP.wantView = nil
+        if view and (NP.wantUntil or 0) >= GetTime() then
             C_Timer.After(0, function() NP.ShowView(view) end)
-        elseif NP.active then
-            NP.Refresh()
         end
     end)
     book:HookScript("OnHide", function()
@@ -5690,35 +6030,34 @@ function NP.Attach()
     tab:Show()
     PB.onChoose = function() if NP.active then NP.Refresh() end end
     ns.OnSession = function()
-        if NP.active and NP.Kind() ~= "craft" then NP.Refresh() end
+        if NP.active and NP.mode == "farming" then NP.Refresh() end
     end
     ns.OnSettings = function()
-        if NP.active then NP.RefreshChecks() if NP.Kind() ~= "craft" then NP.Refresh() end end
+        if NP.active then
+            NP.RefreshChecks()
+            if NP.mode == "fishing" then NP.DrawFishing() end
+        end
     end
 end
 
--- Windfall on a view: "session", "zones", "fishing", "recipes", "levelling",
--- "settings" (the gear menu), or nil for the one last shown; always for the
--- character you are on.
+-- Windfall on a view ("recipes", "levelling", "money", "farming",
+-- "fishing"), with the gear menu ("settings"), or as it was last (nil).
 function NP.ShowView(view)
     local book = NP.book
     if not (book and book:IsShown()) then return end
-    if not NP.active then NP.Home() end
-    if view == "session" or view == "zones" then
-        NP.special, NP.mode = "farm", view
-    elseif view == "fishing" then
-        if NP.FishingOf(db.chars and db.chars[PB.view.char]) then NP.special, NP.mode = "fish", view end
-    elseif view == "recipes" or view == "levelling" then
-        NP.special, NP.mode = nil, view
-    end
-    NP.SetActive(true, view == "recipes" or view == "levelling")
-    NP.Refresh()
-    if view == "settings" and NP.gearMenu then
+    if VIEW[view] then NP.mode = VIEW[view] end
+    if NP.active then NP.Refresh() else NP.SetActive(true) end
+    if view == "settings" then
         NP.RefreshChecks()
         NP.gearMenu:Show()
     end
 end
 
+-- Opens the profession window on Windfall, or closes it when Windfall shows.
+-- Opening a crafting profession is how the game itself opens this window, so
+-- Windfall does the same with one of yours (an addon may not cast the
+-- profession spell the window would otherwise cast as it opens). A character
+-- without a crafting profession gets the window on its overview page.
 function NP.Open(view)
     if InCombatLockdown and InCombatLockdown() then
         print("|cff7fd36bWindfall|r: the profession window opens after combat.")
@@ -5745,7 +6084,7 @@ function NP.Open(view)
         end
         return
     end
-    NP.wantView = view or "last"
+    NP.wantView, NP.wantUntil = view or "last", GetTime() + 2
     local line = book.selectedSkillLine
     if not line and GetProfessions and GetProfessionInfo then
         for _, index in pairs({ GetProfessions() }) do
@@ -5766,6 +6105,7 @@ local watcher = CreateFrame("Frame")
 watcher:RegisterEvent("ADDON_LOADED")
 watcher:RegisterEvent("PLAYER_LOGIN")
 watcher:RegisterEvent("BAG_UPDATE_DELAYED")
+pcall(watcher.RegisterEvent, watcher, "TRADE_SKILL_SHOW")
 pcall(watcher.RegisterEvent, watcher, "TRADE_SKILL_LIST_UPDATE")
 pcall(watcher.RegisterEvent, watcher, "NEW_RECIPE_LEARNED")
 pcall(watcher.RegisterEvent, watcher, "SKILL_LINES_CHANGED")
@@ -5774,7 +6114,9 @@ watcher:SetScript("OnEvent", function(_, event, name)
     if event == "ADDON_LOADED" and name == "Blizzard_Professions" or event == "PLAYER_LOGIN" then
         if _G.ProfessionsFrame then NP.Attach() end
     elseif NP.active then
-        -- Bags, skill and recipes change while you craft.
+        -- Bags, skill and recipes change while you craft; a profession opening
+        -- may bring new pieces of the game's page.
+        if event == "TRADE_SKILL_SHOW" or event == "TRADE_SKILL_LIST_UPDATE" then NP.rescan = true end
         if not NP.pending then
             NP.pending = true
             C_Timer.After(0.6, function() NP.pending = false NP.Refresh() end)
@@ -5837,13 +6179,17 @@ SlashCmdList["WINDFALL"] = function(msg)
     elseif msg == "prof" or msg == "profs" or msg == "professions" then
         if ns.OpenWindfall then ns.OpenWindfall("recipes") end
     elseif msg == "session" or msg == "farm" or msg == "farming" then
-        if ns.OpenWindfall then ns.OpenWindfall("session") end
+        if ns.OpenWindfall then ns.OpenWindfall("farming") end
+    elseif msg == "money" or msg == "gold" or msg == "profit" then
+        if ns.OpenWindfall then ns.OpenWindfall("money") end
+    elseif msg == "level" or msg == "levelling" or msg == "leveling" or msg == "route" then
+        if ns.OpenWindfall then ns.OpenWindfall("levelling") end
     elseif msg == "sparkle" or msg == "sparkles" then
         Windfall_ToggleSparkles()
     elseif msg == "" or msg == "show" or msg == "hide" or msg == "toggle" then
         Windfall_ToggleWindow()
     else
-        print("|cff7fd36bWindfall|r: /wf (open or close), /wf prof (recipes), /wf session (gold per hour), /wf zones (zone history), /wf settings, /wf gather, /wf loot, /wf start, /wf pause, /wf reset (save and start over), /wf discard, /wf fish (fishing key on or off), /wf fishkey (choose the key), /wf sparkle (node sparkles on or off)")
+        print("|cff7fd36bWindfall|r: /wf (open or close), /wf prof (recipes), /wf level (levelling route), /wf money (what earns), /wf farm (gold per hour and zones), /wf settings, /wf gather, /wf loot, /wf start, /wf pause, /wf reset (save and start over), /wf discard, /wf fish (fishing key on or off), /wf fishkey (choose the key), /wf sparkle (node sparkles on or off)")
     end
 end
 

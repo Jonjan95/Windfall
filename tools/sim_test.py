@@ -676,106 +676,115 @@ print(rt.eval(r'''(function()
   -- the game's profession window: Windfall's side tab and page
   local book = CreateFrame("Frame", "ProfessionsFrame")
   local native = CreateFrame("Button"); book.rightProfessionTabs = { native }
-  local overview = CreateFrame("Frame"); book.GetChildren = function() return overview, native end
+  local overview = CreateFrame("Frame"); overview.alpha = 1
+  overview.SetAlpha = function(self, a) self.alpha = a end; overview.GetAlpha = function(self) return self.alpha end
+  book.GetChildren = function() return overview, native end
   for _, h in ipairs(handlers) do h(nil, "ADDON_LOADED", "Blizzard_Professions") end
   local tab = WindfallProfessionTabButton
   local page = WindfallProfessionPage
   page:Hide()
-  out[#out+1] = "profwin: tab made -> "..tostring(tab ~= nil).." page hidden -> "..tostring(not page:IsShown())
-  tab.onOnMouseUp(tab, "LeftButton")
   local NP = page.NP
+  local function tabs() local t = {} for _, b in ipairs(NP.modeTabs) do if b:IsShown() then t[#t+1] = tostring(b.text)..(b.key == NP.mode and "*" or "") end end return table.concat(t, " | ") end
+  local function icons() local t = {} for _, b in ipairs(NP.header.icons) do if b:IsShown() then t[#t+1] = b.name..(b.ring.shown and "*" or "") end end return table.concat(t, ",") end
   local function rows() local t = {} for _, b in ipairs(NP.headerPool) do if b:IsShown() then t[#t+1] = "["..tostring(b.label.text).."]" end end
     for _, b in ipairs(NP.rowPool) do if b:IsShown() then t[#t+1] = tostring(b.text.text) end end return table.concat(t, " | ") end
-  local function pickIcon(name) for _, b in ipairs(NP.header.icons) do if b:IsShown() and b.name == name then b.onOnClick(b) end end end
-  out[#out+1] = "profwin: opens on the character you are on -> "..tostring(NP.header.char.text)
+  local function go(key) for _, b in ipairs(NP.modeTabs) do if b.key == key then b.onOnClick(b) end end end
+  local function menuRows() local t = {} for _, r in ipairs(WindfallProfessionMenu.rows) do if r:IsShown() then t[#t+1] = (r.forget and "" or "  ")..tostring(r.text.text).." "..tostring(r.right.text) end end return t end
+  local function pickMenu(key, prof) for _, r in ipairs(WindfallProfessionMenu.rows) do if r:IsShown() and r.key == key and r.prof == prof then r.onOnClick(r) return end end end
+  out[#out+1] = "page: tab made -> "..tostring(tab ~= nil).." page hidden -> "..tostring(not page:IsShown())
+  tab.onOnMouseUp(tab, "LeftButton")
+  out[#out+1] = "page: open -> shown="..tostring(page:IsShown()).." | the game's page: still shown="..tostring(overview:IsShown()).." alpha="..tostring(overview.alpha).." | tabs: "..tabs()
+  out[#out+1] = "      on the character you are on: "..tostring(NP.header.char.text).." icons=["..icons().."] list: "..rows()
+  -- every character's professions, one click away
   NP.header.char.onOnClick(NP.header.char)
-  for _, r in ipairs(WindfallCharMenu.rows) do if r:IsShown() and r.key == "Zivv Gg-Realm" then r.onOnClick(r) end end
-  pickIcon("Alchemy")
-  out[#out+1] = "profwin: Zivv Gg's Alchemy -> game's page hidden="..tostring(not overview:IsShown()).." shown="..tostring(page:IsShown()).." char="..tostring(NP.header.char.text).." bar="..tostring(NP.header.bar.text.text)
+  out[#out+1] = "page: character menu ->"
+  for _, line in ipairs(menuRows()) do out[#out+1] = "      "..line end
+  pickMenu("Zivv Gg-Realm", "Alchemy")
+  out[#out+1] = "page: picked Zivv Gg's Alchemy -> char="..tostring(NP.header.char.text).." icons=["..icons().."] bar="..tostring(NP.header.bar.text.text).." menu closed="..tostring(not WindfallProfessionMenu:IsShown())
   out[#out+1] = "      list: "..rows()
   local d = NP.detail; local c = d.content
-  out[#out+1] = "      detail: "..tostring(c.name.text).." | "..tostring(c.desc.text).." | "..tostring(c.reagentHead.text).." | "..tostring(c.tiles[1].count.text).." "..tostring(c.tiles[1].text.text).." | "..tostring(c.tiles[1].alts.text).." | create enabled="..tostring(d.create.enabled).." note="..tostring(d.note.text)
+  out[#out+1] = "      detail: "..tostring(c.name.text).." | "..tostring(c.desc.text).." | "..tostring(c.reagentHead.text).." | "..tostring(c.tiles[1].count.text).." "..tostring(c.tiles[1].text.text).." | create enabled="..tostring(d.create.enabled).." note="..tostring(d.note.text)
   out[#out+1] = "      costs: "..tostring(c.costs.text):gsub("\n", " / ")
   NP.search.text = "elixir"; NP.search.onOnTextChanged(NP.search)
-  out[#out+1] = "profwin: search 'elixir' -> "..rows()
+  out[#out+1] = "page: search 'elixir' -> "..rows()
   NP.search.text = ""; NP.search.onOnTextChanged(NP.search)
-  NP.modeTabs[2].onOnClick(NP.modeTabs[2])
-  out[#out+1] = "profwin: levelling -> "..rows().." | shop shown="..tostring(NP.shop:IsShown())
-  NP.modeTabs[1].onOnClick(NP.modeTabs[1])
-  -- pick Zivv Zniper (this character) from the page's character button
-  NP.header.char.onOnClick(NP.header.char)
-  for _, r in ipairs(WindfallCharMenu.rows) do if r:IsShown() and r.key == "Huntie-Realm" then r.onOnClick(r) end end
-  pickIcon("Cooking")
-  out[#out+1] = "profwin: picked Huntie -> char="..tostring(NP.header.char.text).." bar="..tostring(NP.header.bar.text.text)
-  out[#out+1] = "      list: "..rows()
-  native.onOnMouseDown(native, "LeftButton")
-  out[#out+1] = "profwin: native tab -> page shown="..tostring(page:IsShown()).." game's page back="..tostring(overview:IsShown()).." its tab kept="..tostring(native:IsShown())
-  -- Fishing and Farming in the same page, opened on the character you are on
-  local function icons() local t = {} for _, b in ipairs(NP.header.icons) do if b:IsShown() then t[#t+1] = b.name..(b.ring.shown and "*" or "") end end return table.concat(t, ",") end
-  local function tabs() local t = {} for _, b in ipairs(NP.modeTabs) do if b:IsShown() then t[#t+1] = tostring(b.text)..(b.key == NP.mode and "*" or "") end end return table.concat(t, " | ") end
-  local function pick(name) for _, b in ipairs(NP.header.icons) do if b:IsShown() and b.name == name then b.onOnClick(b) end end end
-  tab.onOnMouseUp(tab, "LeftButton")
-  out[#out+1] = "home: opens on "..tostring(NP.header.char.text).." (Huntie was picked before) -> "..icons().." | tabs: "..tabs()
-  pick("Fishing")
-  out[#out+1] = "home: Fishing -> "..icons().." | tabs: "..tabs().." | bar='"..tostring(NP.header.bar.text.text).."' fishing page="..tostring(NP.fishing:IsShown()).." session="..tostring(NP.session:IsShown())
-  local labels = {}; for _, c in ipairs(NP.checks) do labels[#labels+1] = (c.checked and "[x] " or "[ ] ")..c.label.text end
-  out[#out+1] = "      key="..tostring(NP.keyButton.text).." getaway="..tostring(NP.fishing.getaway.text)
-  out[#out+1] = "      checks: "..table.concat(labels, " / ")
-  for _, c in ipairs(NP.checks) do if c.row and c.row.key == "fishSound" then c.checked = false; c.onOnClick(c) end end
-  out[#out+1] = "home: untick louder splash -> fishSound="..tostring(WindfallDB.fishSound)
-  for _, c in ipairs(NP.checks) do if c.row and c.row.key == "fishSound" then c.checked = true; c.onOnClick(c) end end
-  pick("Farming")
-  local S = NP.session
-  out[#out+1] = "home: Farming -> "..icons().." | tabs: "..tabs().." | bar shown="..tostring(NP.header.barFrame:IsShown()).." session="..tostring(S:IsShown()).." craft list="..tostring(NP.listBox:IsShown())
-  out[#out+1] = "      "..tostring(S.rate.text).." | "..tostring(S.time.text).." | skills: "..tostring(S.skills.text).." | "..tostring(S.total.text)
-  for _, c in ipairs(NP.checks) do if c.label.text == "Herbs" then c.checked = true; c.onOnClick(c) end end
+  go("levelling")
+  out[#out+1] = "page: Levelling -> tabs: "..tabs().." | "..rows().." | search shown="..tostring(NP.search:IsShown()).." plan="..tostring(NP.plan:IsShown()).." shopping list="..tostring(NP.shop:IsShown())
+  -- a profession that can still level: the route, and planning further
+  NP.header.char.onOnClick(NP.header.char); pickMenu("Huntie-Realm", "Leatherworking")
+  out[#out+1] = "page: Huntie's Leatherworking route -> "..rows()
+  out[#out+1] = "      plan button: "..tostring(NP.plan:IsShown() and NP.plan.text).." | shopping list="..tostring(NP.shop:IsShown())
+  NP.plan.onOnClick(NP.plan)
+  local first = NP.headerPool[1]
+  out[#out+1] = "      plan clicked -> "..tostring(first.label.text).." | button now: "..tostring(NP.plan:IsShown() and NP.plan.text)
+  go("recipes")
+  -- Make money: every character's recipes by profit
+  local zg = WindfallDB.chars["Zivv Gg-Realm"]
+  zg.professions.Alchemy.recipes[9001] = { name = "Test Potion", item = 118, qty = 1, reagents = { { 2447, 1 }, { 765, 1 }, { 3371, 1 } }, cat = "Potions" }
+  WindfallDB.chars["Jonjan-Realm"].professions.Tailoring.recipes[9001] = zg.professions.Alchemy.recipes[9001]
+  zg.professions.Alchemy.recipes[9002] = { name = "Losing Potion", item = 765, qty = 1, reagents = { { 118, 1 } } }
+  go("money")
+  local M = NP.money
+  local function money() local t = {} for _, r in ipairs(M.rows) do if r:IsShown() then t[#t+1] = tostring(r.name.text).." | "..tostring(r.who.text).." | "..tostring(r.cost.text).." | "..tostring(r.value.text).." | "..tostring(r.profit.text).." | "..tostring(r.can.text) end end return t end
+  out[#out+1] = "page: Make money -> tabs: "..tabs().." | header: "..tostring(NP.header.caption.text).." char button shown="..tostring(NP.header.char:IsShown()).." | "..tostring(M.count.text)
+  for _, line in ipairs(money()) do out[#out+1] = "      "..line end
+  for _, ch in ipairs(NP.checks) do if ch.label.text == "Only what can be made now" then ch.checked = true; ch.onOnClick(ch) end end
+  out[#out+1] = "      only what can be made now -> rows="..#money().." hint="..tostring(M.hint.text)
+  for _, ch in ipairs(NP.checks) do if ch.label.text == "Only what can be made now" then ch.checked = false; ch.onOnClick(ch) end end
+  M.rows[1].onOnClick(M.rows[1])
+  out[#out+1] = "      click the row -> tabs: "..tabs().." | char="..tostring(NP.header.char.text).." icons=["..icons().."] detail="..tostring(c.name.text)
+  zg.professions.Alchemy.recipes[9001] = nil; zg.professions.Alchemy.recipes[9002] = nil; WindfallDB.chars["Jonjan-Realm"].professions.Tailoring.recipes[9001] = nil
+  -- Farming: the session and the zones together
+  go("farming")
+  local F = NP.farming
+  out[#out+1] = "page: Farming -> tabs: "..tabs().." | header: "..tostring(NP.header.caption.text).." | "..tostring(F.session.rate.text).." | "..tostring(F.session.time.text).." | "..tostring(F.session.total.text).." | skills: "..tostring(F.session.skills.text)
+  out[#out+1] = "      zones: "..tostring(F.zones.title.text).." | "..tostring(F.zones.rows[1].zone.text).." "..tostring(F.zones.rows[1].rate.text).." | hint="..tostring(F.zones.hint.text)
+  for _, ch in ipairs(NP.checks) do if ch.label.text == "Herbs" then ch.checked = true; ch.onOnClick(ch) end end
   out[#out+1] = "      tick Herbs -> sparkle="..tostring(WindfallDB.sparkle).." herbs="..tostring(WindfallDB.sparkleHerb)
-  for _, c in ipairs(NP.checks) do if c.label.text == "Herbs" then c.checked = false; c.onOnClick(c) end end
   SlashCmdList.WINDFALL("sparkle")
-  NP.modeTabs[2].onOnClick(NP.modeTabs[2])
-  local Z = NP.zones
-  out[#out+1] = "home: Zones -> "..tostring(Z.title.text).." | shown="..tostring(Z:IsShown()).." tabs: "..tabs()
-  local gear = NP.header.gear; gear.onOnClick(gear)
-  out[#out+1] = "home: gear -> shown="..tostring(NP.gearMenu:IsShown())
-  gear.onOnClick(gear)
-  -- another character: its crafting professions, Fishing, Farming
-  NP.header.char.onOnClick(NP.header.char)
-  for _, r in ipairs(WindfallCharMenu.rows) do if r:IsShown() and r.key == "Huntie-Realm" then r.onOnClick(r) end end
-  out[#out+1] = "home: picked Huntie -> "..icons().." | tabs: "..tabs()
-  pick("Cooking")
-  out[#out+1] = "home: Cooking -> "..icons().." | tabs: "..tabs().." | list shown="..tostring(NP.listBox:IsShown()).." gather hidden="..tostring(not NP.gpage:IsShown())
-  -- Fishing with Camping recipes: one Fishing icon, with a Recipes tab
-  local hc = WindfallDB.chars["Huntie-Realm"]
-  hc.professions.Fishing = { line = 356, skill = 100, max = 150, recipes = { [500] = { name = "Fish Bowl", item = 9999, qty = 1, reagents = { { 6291, 1 } }, cat = "Camping" } } }
+  -- Fishing: only there because this character fishes
+  go("fishing")
+  local labels = {}; for _, ch in ipairs(NP.checks) do labels[#labels+1] = (ch.checked and "[x] " or "[ ] ")..ch.label.text end
+  out[#out+1] = "page: Fishing -> tabs: "..tabs().." | shown="..tostring(NP.fishing:IsShown()).." bar="..tostring(NP.header.bar.text.text).." key="..tostring(NP.keyButton.text).." getaway="..tostring(NP.fishing.getaway.text)
+  out[#out+1] = "      checks: "..table.concat(labels, " / ")
+  for _, ch in ipairs(NP.checks) do if ch.row and ch.row.key == "fishSound" then ch.checked = false; ch.onOnClick(ch) end end
+  out[#out+1] = "      untick louder splash -> fishSound="..tostring(WindfallDB.fishSound)
+  for _, ch in ipairs(NP.checks) do if ch.row and ch.row.key == "fishSound" then ch.checked = true; ch.onOnClick(ch) end end
+  local oldNote = GetProfessionInfo; GetProfessionInfo = function() return nil end
   NP.Refresh()
-  out[#out+1] = "home: Huntie with Camping recipes -> "..icons()
-  pick("Fishing")
-  out[#out+1] = "      Fishing -> tabs: "..tabs()
-  NP.modeTabs[2].onOnClick(NP.modeTabs[2])
-  local rowsShown = {}; for _, b in ipairs(NP.headerPool) do if b:IsShown() then rowsShown[#rowsShown+1] = "["..tostring(b.label.text).."]" end end
-  for _, b in ipairs(NP.rowPool) do if b:IsShown() then rowsShown[#rowsShown+1] = tostring(b.text.text) end end
-  out[#out+1] = "      Recipes tab -> "..tabs().." | "..table.concat(rowsShown, " | ").." | bar='"..tostring(NP.header.bar.text.text).."'"
-  hc.professions.Fishing = nil
-  -- closing and opening again: back on the character you are on
+  out[#out+1] = "page: a character who does not fish -> tabs: "..tabs()
+  GetProfessionInfo = oldNote; NP.Refresh()
+  local gear = NP.header.gear; gear.onOnClick(gear)
+  out[#out+1] = "page: gear -> shown="..tostring(NP.gearMenu:IsShown())
+  gear.onOnClick(gear)
+  -- one of the game's tabs takes the window back; its pages were never hidden
+  native.onOnMouseDown(native, "LeftButton")
+  out[#out+1] = "page: the game's tab -> page shown="..tostring(page:IsShown()).." the game's page: shown="..tostring(overview:IsShown()).." alpha="..tostring(overview.alpha)
+  go("farming")
   native.onOnMouseDown(native, "LeftButton"); tab.onOnMouseUp(tab, "LeftButton")
-  out[#out+1] = "home: reopened -> "..tostring(NP.header.char.text).." "..icons()
-  -- the bar's gold per hour opens Farming's session
+  out[#out+1] = "page: Windfall again -> tabs: "..tabs().." alpha="..tostring(overview.alpha)
+  -- the bar's gold per hour opens Farming
   book.shown = true
+  go("recipes")
   WindfallBar.money.onOnClick(WindfallBar.money, "LeftButton")
-  out[#out+1] = "home: bar gold/hour (window open) -> char="..tostring(NP.header.char.text).." "..icons().." | tabs: "..tabs()
+  out[#out+1] = "page: bar gold/hour (window open) -> tabs: "..tabs()
   -- the Windfall icon with the window closed: the game opens it through a crafting profession
   book.shown = false; page:Hide(); NP.active = false; book.selectedSkillLine = false
   local opened; local oldOpen = C_TradeSkillUI.OpenTradeSkill; C_TradeSkillUI.OpenTradeSkill = function(line) opened = line end
   local panelShown; local oldShow = ShowUIPanel; ShowUIPanel = function(f) panelShown = f end
   WindfallBar.menu.onOnClick(WindfallBar.menu)
-  out[#out+1] = "home: bar icon, window closed, Zivv Zniper (no crafting) -> OpenTradeSkill="..tostring(opened).." ShowUIPanel="..tostring(panelShown == book).." wants="..tostring(NP.wantView)
+  out[#out+1] = "page: bar icon, window closed, no crafting profession -> OpenTradeSkill="..tostring(opened).." ShowUIPanel="..tostring(panelShown == book).." wants="..tostring(NP.wantView)
   book.shown = true; book.onOnShow(book); runTimers(); runTimers()
-  out[#out+1] = "      window shows -> Windfall page shown="..tostring(page:IsShown()).." char="..tostring(NP.header.char.text)
+  out[#out+1] = "      window shows -> Windfall page shown="..tostring(page:IsShown()).." tabs: "..tabs()
   book.selectedSkillLine = 171; book.shown = false; page:Hide(); NP.active = false; opened = nil; panelShown = nil
-  SlashCmdList.WINDFALL("zones")
-  out[#out+1] = "home: /wf zones, last profession Alchemy -> OpenTradeSkill="..tostring(opened).." ShowUIPanel="..tostring(panelShown ~= nil).." wants="..tostring(NP.wantView)
+  SlashCmdList.WINDFALL("money")
+  out[#out+1] = "page: /wf money, last profession Alchemy -> OpenTradeSkill="..tostring(opened).." ShowUIPanel="..tostring(panelShown ~= nil).." wants="..tostring(NP.wantView)
   book.shown = true; book.onOnShow(book); runTimers(); runTimers()
   out[#out+1] = "      window shows -> tabs: "..tabs()
+  -- a stale request does not hijack a later opening
+  page:Hide(); NP.active = false; NP.wantView = "money"; NP.wantUntil = now - 1
+  book.onOnShow(book); runTimers(); runTimers()
+  out[#out+1] = "page: the window opened by the game later -> Windfall page shown="..tostring(page:IsShown())
   C_TradeSkillUI.OpenTradeSkill = oldOpen; ShowUIPanel = oldShow; book.selectedSkillLine = nil
   GetProfessionInfo = oldGPI3; playerSurname = nil; player = "Huntie"; class = "HUNTER"; containers = {}
   return table.concat(out, "\n")

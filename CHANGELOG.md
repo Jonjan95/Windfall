@@ -2,6 +2,18 @@
 
 All changes to Windfall, newest first. After an update, type `/reload` in game (or restart the game when the notes say so).
 
+## [0.2.43] - 2026-11-16
+
+- **Five tabs that never change:** Recipes, Levelling, Make money, Farming and Fishing sit under the profession window whatever you are looking at. (Fishing is there when the character you are on fishes.) The header's character and profession icons show on Recipes and Levelling, where they apply; Fishing and Farming are no longer icons among the professions.
+- **Every profession on your account in one menu.** The character button lists each character with its professions under it. Click a profession to go straight to it; click a name for that character. Shift-click a name to forget the character.
+- **Make money:** every recipe of every character that sells for more than its materials cost, best profit first, with who makes it, what it costs and sells for, and how many can be made from what that character holds. Search it, or tick *Only what can be made now*. Click a row to open the recipe on its character. A recipe several characters know is listed once.
+- **Levelling:** *Plan to 150 / 225 / 300* and *Shopping list* sit under the route. A profession Windfall has not read yet gets a *Read its recipes* button.
+- **Farming** shows the session and your best zones side by side, with the node sparkle switches under the zones.
+- **Fixes for tabs misbehaving:**
+  - Windfall no longer hides the game's own pages while it shows; they stay as they are underneath, invisible. Hiding them made the window close itself when a profession closed or changed, and brought back stale pages on top of each other when you left Windfall.
+  - Create for a profession that is not the open one opens it and comes straight back to Windfall.
+  - Leaving Windfall and coming back keeps the tab you were on.
+
 ## [0.2.42] - 2026-11-15
 
 - **One Fishing, one Farming.** The header now holds your crafting professions, then **Fishing**, then **Farming**, the same on every character:

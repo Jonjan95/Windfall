@@ -7,17 +7,21 @@ A World of Warcraft Forever addon for making and spending gold well: what your f
 ## Getting around
 
 - **Windfall lives in the game's profession window**, as a tab with the profession tabs on its right side. The Windfall icon on the bar, the key binding and `/wf` open the window on it.
-- **At the top** pick any of your characters (it opens on the one you are playing) and one of the icons: their crafting professions, **Fishing** and **Farming**. A skill bar shows where that profession is. The gear holds the general settings.
-- **Tabs under the window** change with the icon: **Recipes** and **Levelling** for crafting; **Session** and **Zones** for Farming; **Fishing** (and **Recipes** for Camping) for Fishing.
+- **Five tabs under the window:** **Recipes**, **Levelling**, **Make money**, **Farming** and **Fishing** (when the character you are on fishes).
+- **At the top**, on Recipes and Levelling: the character button lists every character with its professions, so any profession on your account is one click away; the icons are that character's professions, and a skill bar shows where the picked one is. It opens on the character you are playing. The gear holds the general settings.
 - **The bar** stays on screen: your gold per hour and session time (click for the Session page), a fish switch (fishing key on or off, right-click to choose the key), a flower switch (node sparkles on or off), and the Windfall icon. Drag it wherever you like.
 - **The shopping list** docks next to the auction house or a vendor when there is something on it to buy there; *Shopping list* on the Levelling page opens it beside the profession window.
 
 ## Farming
 
-- **Two views:** *Gathering* counts only herbs, ore, skins and fish (mob loot does not pull your rate down). *All loot* counts everything you loot, plus coins. Switch on the Session page or by right-clicking the gold per hour on the bar; nothing is lost when you switch.
+- **Two views:** *Gathering* counts only herbs, ore, skins and fish (mob loot does not pull your rate down). *All loot* counts everything you loot, plus coins. Switch on the Farming tab or by right-clicking the gold per hour on the bar; nothing is lost when you switch.
 - **Prices:** Auctionator's last scanned price, or the vendor price when that is higher or the item was never scanned.
 - **Calm numbers:** updated when you loot something or once a minute.
-- **Zones:** Reset saves the session per zone. The Zones tab ranks zones by gold per hour, so you can tell which spot is worth farming.
+- **Zones:** Reset saves the session per zone. The Farming tab ranks your zones by gold per hour next to the session, so you can tell which spot is worth farming.
+
+## Make money
+
+Every recipe of every character that sells for more than its materials cost at your last scanned prices, best profit first: who makes it, what it costs to craft, what it sells for after the auction house cut, the profit for one craft, and how many that character can make from its own bags and bank. Search by name, or tick *Only what can be made now*. Click a row to open the recipe on its character.
 
 ## Professions
 
@@ -37,7 +41,7 @@ Trainer recipe data comes from **What's Training?** by Sveng (MIT licence) and s
 
 ## Node sparkles
 
-Switched on from the bar, the gear or Farming's Session page, the nearest herb, ore vein or fishing pool you can gather gets a sparkle and the game's gather icon. Quest objects, chests and NPCs get nothing. Each kind can be switched off on its own. The game only picks up nodes within about 15 yards.
+Switched on from the bar, the gear or the Farming tab, the nearest herb, ore vein or fishing pool you can gather gets a sparkle and the game's gather icon. Quest objects, chests and NPCs get nothing. Each kind can be switched off on its own. The game only picks up nodes within about 15 yards.
 
 When Windfall is done with the interact key (the line comes in, or sparkles are switched off), it puts it back to the game's defaults: 10 yards, in front of you. The rest of the time it leaves the interact settings alone, so other addons can set them as they like.
 
@@ -49,14 +53,14 @@ When Windfall is done with the interact key (the line comes in, or sparkles are 
 - **Louder splash:** sound effects to full and music and ambience to a quarter while the line is out.
 - **Also:** double right-click to cast, auto loot while fishing, switches off after 10 idle minutes, and a line telling you how many fish get away in the zone you are in.
 
-Every option is a checkbox on Fishing's **Fishing** tab.
+Every option is a checkbox on the **Fishing** tab.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
 | `/wf` | Open or close Windfall in the profession window |
-| `/wf prof`, `/wf session`, `/wf zones`, `/wf settings` | Open that page |
+| `/wf prof`, `/wf level`, `/wf money`, `/wf farm`, `/wf settings` | Open that tab |
 | `/wf gather`, `/wf loot` | Switch view |
 | `/wf start`, `/wf pause` | Start or pause the clock |
 | `/wf reset` | Save the session to the zone history and start over (`/wf discard` throws it away) |
