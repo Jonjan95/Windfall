@@ -3524,7 +3524,7 @@ function RouteTarget(skill)
     return 300
 end
 
-local function BuildRoute(prof, target, charLevel)
+local function BuildRoute(prof, target, charLevel, charKey)
     local skill = prof.skill or 1
     local trainer = prof.line and ns.TrainerRecipes[prof.line] or {}
     -- Level each rank needs, and where it comes from, from the trainer data.
@@ -3548,9 +3548,31 @@ local function BuildRoute(prof, target, charLevel)
         end
     end
     for _, p in ipairs(pool) do
-        local cost, value, _, missing = CraftNumbers(p.recipe)
+        local cost, value = CraftNumbers(p.recipe)
         p.cost, p.value = cost, value or 0
-        p.usable = not missing and not p.recipe.noReagents and p.recipe.reagents[1] ~= nil
+        p.usable = not p.recipe.noReagents and p.recipe.reagents[1] ~= nil
+    end
+
+    -- Materials the character already has (bags and bank) are paid for: the
+    -- route uses them up first, so what you bought for a plan still decides it
+    -- after prices move or new recipes are learned. A reagent with no price is
+    -- fine as long as it is on hand.
+    local stock = {}
+    local function Stock(id)
+        if stock[id] == nil then stock[id] = (charKey and HaveCount and HaveCount(charKey, id)) or 0 end
+        return stock[id]
+    end
+    local function CostNow(p)
+        local cost = 0
+        for _, r in ipairs(p.recipe.reagents) do
+            local short = r[2] - Stock(r[1])
+            if short > 0 then
+                local price = ReagentPrice(r[1])
+                if not price then return nil end
+                cost = cost + price * short
+            end
+        end
+        return cost
     end
 
     local steps, crafts, trained, gaps = {}, {}, {}, {}
@@ -3585,10 +3607,11 @@ local function BuildRoute(prof, target, charLevel)
         -- only when nothing better is left at this skill.
         local best, bestScore, bestChance, bestSure
         for _, p in ipairs(pool) do
-            if p.usable and p.unlock <= level then
+            local cost = p.usable and p.unlock <= level and CostNow(p)
+            if cost then
                 local chance = SkillUpChance(p.id, p.unlock, level)
                 if chance > 0 then
-                    local score = PointCost(p.cost, p.value, chance) + (trained[p.id] and 0 or p.train / TRAIN_SPREAD)
+                    local score = PointCost(cost, p.value, chance) + (trained[p.id] and 0 or p.train / TRAIN_SPREAD)
                     local sure = chance >= MIN_CHANCE
                     if not best or (sure and not bestSure) or (sure == bestSure and score < bestScore) then
                         best, bestScore, bestChance, bestSure = p, score, chance, sure
@@ -3602,6 +3625,9 @@ local function BuildRoute(prof, target, charLevel)
         else
             trained[best.id] = true
             crafts[best.id] = (crafts[best.id] or 0) + 1 / bestChance
+            for _, r in ipairs(best.recipe.reagents) do
+                stock[r[1]] = math.max(Stock(r[1]) - r[2] / bestChance, 0)
+            end
             -- Tries for one point vary (a geometric spread): (1 - chance) / chance^2.
             spread[best.id] = (spread[best.id] or 0) + (1 - bestChance) / (bestChance * bestChance)
             if current and current.p == best then
@@ -4271,7 +4297,7 @@ local function FillRoute(keepStatus)
         return
     end
     local char = db.chars and db.chars[r.char]
-    local steps, items, trainCost, gaps = BuildRoute(prof, r.target, char and char.level)
+    local steps, items, trainCost, gaps = BuildRoute(prof, r.target, char and char.level, r.char)
     shop.single = false
     shop.title = string.format("%s %d to %d", r.name, prof.skill or 1, r.target)
     shop.lines = {}
@@ -5705,7 +5731,7 @@ function NP.BuildList(prof)
     if NP.mode == "levelling" then
         local char = (db.chars or {})[PB.view.char]
         local target = PB.view.target or RouteTarget(prof.skill or 1)
-        local steps, _, _, gaps = ComputeRoute(prof, target, char and char.level)
+        local steps, _, _, gaps = ComputeRoute(prof, target, char and char.level, PB.view.char)
         nodes[#nodes + 1] = { header = string.format("Route %d to %d", prof.skill or 1, target) }
         for _, st in ipairs(steps) do
             if st.rank then
@@ -7055,6 +7081,7 @@ end)
 end
 
 ns.dev = {
+    Route = function(...) return ComputeRoute(...) end,
     TogglePanel = function() TogglePanel() end,
     ToggleProfessions = function() ToggleProfessions() end,
     ToggleSettings = function() ToggleSettings() end,

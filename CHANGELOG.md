@@ -2,6 +2,10 @@
 
 All changes to Windfall, newest first. After an update, type `/reload` in game (or restart the game when the notes say so).
 
+## [0.2.51] - 2026-11-16
+
+- **Fix: the levelling route uses what you already bought.** The route is planned again at every skill-up, and it priced every craft as if all its materials still had to be bought. So after a price moved or you learned a new recipe, it could switch halfway to something you had not bought for (Small Silk Pack, needing Heavy Leather, at 134 Tailoring). Materials in your bags and bank now count as already paid for: the route uses them up first and only then goes for the cheapest new materials. A material the auction house has no price for is fine too, as long as you have it.
+
 ## [0.2.50] - 2026-11-16
 
 - **Shopping list as a drawer.** At the auction house and at vendors a small Windfall tab sits on the window's right edge. Click it to pull the shopping list out beside the window and click again to push it back in; it stays as you left it the next time. No second window opens by itself any more.

@@ -620,6 +620,23 @@ print(rt.eval(r'''(function()
   out[#out+1] = "      "..drawerRows()
   ev2(nil, "MERCHANT_CLOSED"); MerchantFrame.shown = false; pn("vendor closes")
   out[#out+1] = "drawer: vendor closes -> tab shown="..tostring(DT:IsShown()).." drawer shown="..tostring(DR:IsShown()).." remembers open="..tostring(WindfallDB.drawerOpen)
+  -- the route uses what is already bought before anything cheaper
+  do
+    local prof = { skill = 130, max = 150, recipes = {
+      [900001] = { name = "Cheap", diff = "optimal", qty = 1, reagents = { { 2318, 1 } } },
+      [900002] = { name = "Bought", diff = "optimal", qty = 1, reagents = { { 2302, 1 } } },
+      [900003] = { name = "NoPrice", diff = "optimal", qty = 1, reagents = { { 4234, 1 } } } } }
+    local function first(key)
+      local steps = WF_NS.dev.Route(prof, 135, 40, key)
+      local t = {}
+      for _, st in ipairs(steps) do if st.p then t[#t+1] = st.p.recipe.name.." "..st.from.."-"..st.to end end
+      return table.concat(t, ", ")
+    end
+    out[#out+1] = "stock: nothing on hand -> "..first(nil)
+    WindfallDB.chars["Stocky-Realm"] = { professions = {}, bags = { [2302] = 3 }, bank = { [4234] = 1 } }
+    out[#out+1] = "stock: 3 bought, 1 unpriced in the bank -> "..first("Stocky-Realm")
+    WindfallDB.chars["Stocky-Realm"] = nil
+  end
   -- the auction house: the drawer comes out by itself, as it was left
   AuctionHouseFrame.shown = true; ev2(nil, "AUCTION_HOUSE_SHOW"); runTimers()
   out[#out+1] = "drawer: auction house opens -> tab shown="..tostring(DT:IsShown()).." drawer shown="..tostring(DR:IsShown())
