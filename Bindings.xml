@@ -8,4 +8,7 @@
 	<Binding name="WINDFALL_SPARKLE" category="ADDONS">
 		Windfall_ToggleSparkles()
 	</Binding>
+	<Binding name="WINDFALL_HUD" category="ADDONS">
+		Windfall_ToggleFarmHud()
+	</Binding>
 </Bindings>

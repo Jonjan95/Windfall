@@ -952,6 +952,7 @@ BINDING_HEADER_WINDFALL = "Windfall"
 BINDING_NAME_WINDFALL_FISHTOGGLE = "Fishing key on / off"
 BINDING_NAME_WINDFALL_WINDOW = "Open or close Windfall (profession window)"
 BINDING_NAME_WINDFALL_SPARKLE = "Node sparkles on / off"
+BINDING_NAME_WINDFALL_HUD = "Farming mode on / off"
 
 end
 
@@ -1922,7 +1923,7 @@ end
 
 function BuildBar()
     local b = CreateFrame("Frame", "WindfallBar", UIParent, "BackdropTemplate")
-    b:SetSize(250, 26)
+    b:SetSize(272, 26)
     b:SetFrameStrata("MEDIUM")
     b:SetClampedToScreen(true)
     b:SetMovable(true)
@@ -1975,8 +1976,20 @@ function BuildBar()
     end)
 
     -- Fishing key on or off; right-click picks the key.
+    -- Farming mode on or off.
+    b.hud = BarIcon(b, "Interface\\Icons\\INV_Misc_Map_01", 16)
+    b.hud:SetPoint("RIGHT", b.sparkle, "LEFT", -6, 0)
+    b.hud:SetScript("OnClick", function() Windfall_ToggleFarmHud() end)
+    b.hud:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Farming mode" .. (ns.HudOn and ns.HudOn() and "  |cff7fd36bON|r" or "  |cff999999off|r"))
+        GameTooltip:AddLine("The minimap, large and see-through in the middle of the screen, so node dots show around your character.", 1, 1, 1, true)
+        GameTooltip:AddLine("Click: switch on or off", 0.6, 0.6, 0.6)
+        GameTooltip:Show()
+    end)
+
     b.fish = BarIcon(b, FISH_ICON, 16)
-    b.fish:SetPoint("RIGHT", b.sparkle, "LEFT", -6, 0)
+    b.fish:SetPoint("RIGHT", b.hud, "LEFT", -6, 0)
     b.fish:SetScript("OnClick", function(_, button)
         if button == "RightButton" then StartKeyCapture() else Windfall_ToggleFishing() end
     end)
@@ -2033,6 +2046,9 @@ function UpdateBarIcons()
     bar.fish:SetAlpha(db.fishOn and 1 or 0.45)
     bar.sparkle.icon:SetDesaturated(not db.sparkle)
     bar.sparkle:SetAlpha(db.sparkle and 1 or 0.45)
+    local hud = ns.HudOn and ns.HudOn() or false
+    bar.hud.icon:SetDesaturated(not hud)
+    bar.hud:SetAlpha(hud and 1 or 0.45)
 end
 
 -- ---------------------------------------------------------------- slash ----
@@ -4320,6 +4336,230 @@ function RebuildRoute()
 end
 end
 
+-- --------------------------------------------------------- farming mode ----
+
+-- Farming mode: the minimap itself, large and in the middle of the screen,
+-- with its terrain invisible, so the node dots sit around your character
+-- where you are looking. (The way the FarmHud addon does it: a minimap at
+-- alpha 0 draws no terrain, but the game still draws its tracking dots.)
+-- The map turns with you, lets every click through, and goes back exactly
+-- as it was when the mode is switched off. The game does not let addons
+-- move the minimap in combat, so switching waits for combat to end.
+do
+local HUD = { on = false, quiet = {}, since = 0, scan = 0 }
+local SCALE = 1.4 -- the dots are drawn at the map's scale: a little larger than usual
+
+-- The minimap's own method, past anything an addon put on the Minimap table
+-- (skins hook SetPoint and SetParent to keep the map where they want it).
+local function Map(method, ...)
+    local index = getmetatable(Minimap).__index
+    local fn = type(index) == "table" and index[method] or Minimap[method]
+    return fn(Minimap, ...)
+end
+
+local function Fighting()
+    return InCombatLockdown and InCombatLockdown()
+end
+
+function HUD.Size()
+    local width, height
+    if WorldFrame and WorldFrame.GetSize then width, height = WorldFrame:GetSize() end
+    if not (width and height) then width, height = 1024, 768 end
+    local ui = UIParent.GetEffectiveScale and UIParent:GetEffectiveScale() or 1
+    if type(ui) ~= "number" or ui <= 0 then ui = 1 end
+    local share = math.max(0.4, math.min(1, (db.hudSize or 80) / 100))
+    return math.min(width, height) / ui * share
+end
+
+function HUD.Build()
+    local f = CreateFrame("Frame", "WindfallFarmHud", UIParent)
+    f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+    f:SetFrameStrata("BACKGROUND")
+    f:Hide()
+    -- Where other addons' minimap pins go (GatherMate2's remembered nodes):
+    -- a frame the size of the map that answers the questions they ask a minimap.
+    local pins = CreateFrame("Frame", nil, f)
+    pins:SetPoint("CENTER", f, "CENTER", 0, 0)
+    function pins:GetZoom() return Minimap:GetZoom() end
+    function pins:SetZoom() end
+    function pins:PingLocation() end
+    f.pins = pins
+    f:SetScript("OnUpdate", function(_, elapsed) HUD.Hold(elapsed) end)
+    HUD.frame = f
+    return f
+end
+
+-- Puts the map in the overlay (again, when something moved it back).
+function HUD.Place()
+    local f = HUD.frame
+    local size = HUD.Size()
+    f:SetSize(size, size)
+    f.pins:SetScale(SCALE)
+    f.pins:SetSize(size / SCALE, size / SCALE)
+    pcall(Map, "SetParent", f)
+    pcall(Map, "ClearAllPoints")
+    pcall(Map, "SetPoint", "CENTER", f, "CENTER", 0, 0)
+    pcall(Map, "SetFrameStrata", "BACKGROUND")
+    pcall(Map, "SetFrameLevel", 1)
+    pcall(Map, "SetScale", SCALE)
+    pcall(Map, "SetSize", size / SCALE, size / SCALE)
+    pcall(Map, "SetZoom", 0)
+    pcall(Map, "SetAlpha", 0)
+    pcall(Map, "EnableMouse", false)
+    pcall(Map, "EnableMouseWheel", false)
+    HUD.want = size / SCALE
+end
+
+-- Buttons and other pieces on the minimap come along invisibly; they must
+-- not take clicks in the middle of the screen.
+function HUD.Quiet(frame)
+    for _, child in ipairs({ frame:GetChildren() }) do
+        if child:IsMouseEnabled() == true and not (Fighting() and child:IsProtected()) then
+            HUD.quiet[child] = true
+            child:EnableMouse(false)
+        end
+        HUD.Quiet(child)
+    end
+end
+
+-- GatherMate2 and Routes draw on the minimap; they can draw on the overlay instead.
+function HUD.Others(on)
+    local target = on and HUD.frame.pins or Minimap
+    local gm = _G.GatherMate2
+    local display = gm and gm.GetModule and gm:GetModule("Display", true)
+    if display then
+        if display.ChangedVars then pcall(display.ChangedVars, display, nil, "rotateMinimap", C_CVar.GetCVar("rotateMinimap")) end
+        if display.ReparentMinimapPins then pcall(display.ReparentMinimapPins, display, target) end
+    end
+    local routes = _G.Routes
+    if routes and routes.ReparentMinimap then pcall(routes.ReparentMinimap, routes, target) end
+end
+
+function HUD.Rotate(value)
+    if not (C_CVar and C_CVar.SetCVar) then return end
+    C_CVar.SetCVar("rotateMinimap", value)
+    if Minimap_UpdateRotationSetting then pcall(Minimap_UpdateRotationSetting) end
+end
+
+-- While the mode is on: the map stays put, invisible and click-through,
+-- whatever another addon does to it.
+function HUD.Hold(elapsed)
+    HUD.since = HUD.since + (elapsed or 0)
+    if HUD.since < 0.2 then return end
+    HUD.scan = HUD.scan + HUD.since
+    HUD.since = 0
+    local alpha = Minimap:GetAlpha()
+    if type(alpha) == "number" and alpha > 0 then pcall(Map, "SetAlpha", 0) end
+    if Fighting() then return end
+    local width = Minimap:GetWidth()
+    if Minimap:GetParent() ~= HUD.frame or (type(width) == "number" and HUD.want and math.abs(width - HUD.want) > 1)
+        or Minimap:IsMouseEnabled() == true then
+        HUD.Place()
+    end
+    if HUD.scan >= 2 then
+        HUD.scan = 0
+        HUD.Quiet(Minimap)
+    end
+end
+
+function HUD.Enable()
+    if HUD.on then return end
+    if not (Minimap and Minimap.GetParent) then return end
+    if Fighting() then
+        print("|cff7fd36bWindfall|r: farming mode switches on after combat.")
+        HUD.wanted = true
+        return
+    end
+    local f = HUD.frame or HUD.Build()
+    local s = { parent = Minimap:GetParent(), points = {}, scale = Minimap:GetScale(), strata = Minimap:GetFrameStrata(),
+        level = Minimap:GetFrameLevel(), mouse = Minimap:IsMouseEnabled(), wheel = Minimap:IsMouseWheelEnabled(),
+        alpha = Minimap:GetAlpha(), zoom = Minimap:GetZoom(), shown = Minimap:IsShown(),
+        rotate = C_CVar and C_CVar.GetCVar and C_CVar.GetCVar("rotateMinimap") }
+    s.width, s.height = Minimap:GetSize()
+    for i = 1, Minimap:GetNumPoints() or 0 do s.points[i] = { Minimap:GetPoint(i) } end
+    HUD.saved = s
+    HUD.on, HUD.wanted = true, nil
+    pcall(Map, "Hide")
+    HUD.Place()
+    f:Show()
+    pcall(Map, "Show")
+    HUD.Quiet(Minimap)
+    HUD.Rotate("1")
+    HUD.Others(true)
+    if UpdateBarIcons then UpdateBarIcons() end
+    if RefreshSettings then RefreshSettings() end
+end
+
+function HUD.Disable()
+    if not HUD.on then HUD.wanted = nil return end
+    if Fighting() then
+        print("|cff7fd36bWindfall|r: farming mode switches off after combat.")
+        HUD.leaving = true
+        return
+    end
+    local s = HUD.saved or {}
+    HUD.on, HUD.leaving = false, nil
+    HUD.frame:Hide()
+    if s.rotate then HUD.Rotate(s.rotate) end
+    HUD.Others(false)
+    pcall(Map, "Hide")
+    if s.parent then pcall(Map, "SetParent", s.parent) end
+    if s.scale then pcall(Map, "SetScale", s.scale) end
+    if s.width and s.height then pcall(Map, "SetSize", s.width, s.height) end
+    if s.strata then pcall(Map, "SetFrameStrata", s.strata) end
+    if s.level then pcall(Map, "SetFrameLevel", s.level) end
+    pcall(Map, "ClearAllPoints")
+    for _, point in ipairs(s.points or {}) do pcall(Map, "SetPoint", unpack(point)) end
+    if s.zoom then pcall(Map, "SetZoom", s.zoom) end
+    pcall(Map, "EnableMouse", s.mouse ~= false)
+    pcall(Map, "EnableMouseWheel", s.wheel ~= false)
+    pcall(Map, "SetAlpha", type(s.alpha) == "number" and s.alpha or 1)
+    if s.shown ~= false then pcall(Map, "Show") end
+    for child in pairs(HUD.quiet) do pcall(child.EnableMouse, child, true) end
+    HUD.quiet = {}
+    HUD.saved = nil
+    -- a minimap skin puts its own look back
+    if _G._EMM_ApplyMapAlpha then pcall(_G._EMM_ApplyMapAlpha) end
+    if UpdateBarIcons then UpdateBarIcons() end
+    if RefreshSettings then RefreshSettings() end
+end
+
+function Windfall_ToggleFarmHud()
+    if not db then return end
+    if HUD.on and not HUD.leaving then
+        HUD.Disable()
+    elseif HUD.leaving then
+        HUD.leaving = nil -- changed your mind in combat: it stays on
+    elseif HUD.wanted then
+        HUD.wanted = nil
+    else
+        HUD.Enable()
+    end
+end
+
+-- How much of the screen's height the map takes, in percent (40 to 100).
+function ns.SetHudSize(percent)
+    db.hudSize = math.max(40, math.min(100, math.floor(percent + 0.5)))
+    if HUD.on and not Fighting() then HUD.Place() end
+    return db.hudSize
+end
+
+function ns.HudOn()
+    return HUD.on and not HUD.leaving or HUD.wanted == true
+end
+
+local watcher = CreateFrame("Frame")
+watcher:RegisterEvent("PLAYER_REGEN_ENABLED")
+watcher:RegisterEvent("PLAYER_LOGOUT")
+watcher:SetScript("OnEvent", function(_, event)
+    if event == "PLAYER_REGEN_ENABLED" then
+        if HUD.leaving then HUD.Disable() elseif HUD.wanted then HUD.Enable() end
+    elseif HUD.on and HUD.saved and HUD.saved.rotate then
+        HUD.Rotate(HUD.saved.rotate) -- the rotation setting is saved by the game: leave it as it was
+    end
+end)
+end
+
 -- ---------------------------------------------------- profession window ----
 
 -- Windfall's home: a side tab in the game's profession window, and a page
@@ -5640,6 +5880,10 @@ function NP.BuildFarming(parent)
     local head = z:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     head:SetPoint("BOTTOMLEFT", 16, y + 4)
     head:SetText("Node sparkles")
+    z.hud = NP.Button(z, "Farming mode", 120)
+    z.hud:SetPoint("BOTTOMRIGHT", -10, 38)
+    z.hud:SetScript("OnClick", function() Windfall_ToggleFarmHud() end)
+    NP.Tooltip(z.hud, "Farming mode", "The minimap, large and see-through in the middle of the screen, so node dots show around your character. Also on the bar and as a key binding; /wf hud 70 sets its size.")
     z.clear = NP.Button(z, "Clear zones", 100)
     z.clear:SetPoint("BOTTOMRIGHT", -10, 10)
     z.clear:SetScript("OnClick", function()
@@ -5718,6 +5962,7 @@ function NP.DrawFarming()
     z.hint:SetPoint("TOPLEFT", 16, -72 - math.min(#zones, ZONE_ROWS) * ROW)
     z.hint:SetPoint("RIGHT", -16, 0)
     z.hint:SetText(zoneHint or "")
+    z.hud:SetText(ns.HudOn() and "Farming mode: on" or "Farming mode")
 end
 
 -- -------------------------------------------------------------- Fishing --
@@ -6233,7 +6478,7 @@ function NP.Attach()
     ns.OnSettings = function()
         if NP.active then
             NP.RefreshChecks()
-            if NP.mode == "fishing" then NP.DrawFishing() end
+            if NP.mode == "fishing" then NP.DrawFishing() elseif NP.mode == "farming" then NP.DrawFarming() end
         end
     end
 end
@@ -6384,10 +6629,14 @@ SlashCmdList["WINDFALL"] = function(msg)
         if ns.OpenWindfall then ns.OpenWindfall("levelling") end
     elseif msg == "sparkle" or msg == "sparkles" then
         Windfall_ToggleSparkles()
+    elseif msg == "hud" or msg == "map" or msg == "farmhud" then
+        Windfall_ToggleFarmHud()
+    elseif msg:match("^hud%s+%d+$") then
+        print("|cff7fd36bWindfall|r: farming mode map is " .. ns.SetHudSize(tonumber(msg:match("%d+"))) .. "% of the screen's height.")
     elseif msg == "" or msg == "show" or msg == "hide" or msg == "toggle" then
         Windfall_ToggleWindow()
     else
-        print("|cff7fd36bWindfall|r: /wf (open or close), /wf prof (recipes), /wf level (levelling route), /wf money (what earns), /wf farm (gold per hour and zones), /wf settings, /wf gather, /wf loot, /wf start, /wf pause, /wf reset (save and start over), /wf discard, /wf fish (fishing key on or off), /wf fishkey (choose the key), /wf sparkle (node sparkles on or off)")
+        print("|cff7fd36bWindfall|r: /wf (open or close), /wf prof (recipes), /wf level (levelling route), /wf money (what earns), /wf farm (gold per hour and zones), /wf settings, /wf gather, /wf loot, /wf start, /wf pause, /wf reset (save and start over), /wf discard, /wf fish (fishing key on or off), /wf fishkey (choose the key), /wf sparkle (node sparkles on or off), /wf hud (farming mode: the minimap as an overlay; /wf hud 70 sets its size)")
     end
 end
 

@@ -2,6 +2,13 @@
 
 All changes to Windfall, newest first. After an update, type `/reload` in game (or restart the game when the notes say so).
 
+## [0.2.45] - 2026-11-16
+
+- **Farming mode:** the minimap, large and see-through in the middle of the screen, so herb and ore dots show around your character instead of up in the corner. The terrain is invisible, the map turns with you and lets every click through, and GatherMate2's remembered nodes move onto it. Switching it off puts the minimap back exactly as it was.
+  - Switch it with the map icon on the bar, the *Farming mode* button on the Farming tab, `/wf hud`, or a key binding (Options > Keybindings > AddOns > Windfall).
+  - `/wf hud 70` sets its size in percent of the screen's height (40 to 100, 80 to start with).
+  - The game does not let addons move the minimap in combat, so switching waits until combat ends.
+
 ## [0.2.44] - 2026-11-16
 
 - **Levelling guides for Herbalism, Mining, Skinning and Fishing.** Gathering professions now sit with the crafting ones in the header and in the character menu, for every character. On the Levelling tab they show a guide instead of a route:

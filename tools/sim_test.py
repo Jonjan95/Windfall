@@ -827,6 +827,16 @@ print(rt.eval(r'''(function()
   book.onOnShow(book); runTimers(); runTimers()
   out[#out+1] = "page: the window opened by the game later -> Windfall page shown="..tostring(page:IsShown())
   C_TradeSkillUI.OpenTradeSkill = oldOpen; ShowUIPanel = oldShow; book.selectedSkillLine = nil
+  -- farming mode: the minimap as an overlay, put back afterwards, never moved in combat
+  Minimap.SetAlpha = function(self, a) self.alpha = a end; Minimap.GetAlpha = function(self) return self.alpha end
+  Minimap.SetParent = function(self, parent) self.parent = parent end; Minimap.GetParent = function(self) return self.parent end
+  Minimap.alpha = 1; Minimap.parent = UIParent; cvars.rotateMinimap = "0"
+  Windfall_ToggleFarmHud()
+  out[#out+1] = "hud: on -> overlay shown="..tostring(WindfallFarmHud:IsShown()).." map in overlay="..tostring(Minimap.parent == WindfallFarmHud).." terrain alpha="..tostring(Minimap.alpha).." rotate="..tostring(cvars.rotateMinimap).." bar icon lit="..tostring(not WindfallBar.hud.icon.desat)
+  combat = true; Windfall_ToggleFarmHud()
+  out[#out+1] = "hud: off in combat -> still in overlay="..tostring(Minimap.parent == WindfallFarmHud)
+  combat = false; for _, h in ipairs(handlers) do h(nil, "PLAYER_REGEN_ENABLED") end
+  out[#out+1] = "hud: combat over -> overlay shown="..tostring(WindfallFarmHud:IsShown()).." map back="..tostring(Minimap.parent == UIParent).." alpha="..tostring(Minimap.alpha).." rotate="..tostring(cvars.rotateMinimap)
   GetProfessionInfo = oldGPI3; playerSurname = nil; player = "Huntie"; class = "HUNTER"; containers = {}
   return table.concat(out, "\n")
 end)()''').replace("|cffffd700g|r","g").replace("|cffc7c7cfs|r","s").replace("|cffeda55fc|r","c"))
