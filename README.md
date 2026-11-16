@@ -37,6 +37,8 @@ The **Levelling** tab plays that forward for the picked profession, up to the ne
 
 Works for Alchemy, Blacksmithing, Cooking, Enchanting, Engineering, First Aid, Leatherworking and Tailoring.
 
+**Herbalism, Mining, Skinning and Fishing** get a guide on the Levelling tab instead: the stretches of skill with the one you are in marked, what to gather in each (coloured by how often it gives a point at your skill), the zones to find it in, and the ranks to train on the way. Skill levels and zones are Classic's.
+
 Trainer recipe data comes from **What's Training?** by Sveng (MIT licence) and skill-up levels from the game's own recipe table; see `Data/THIRD_PARTY.md`. `tools/import_recipes.py` rebuilds the recipe list.
 
 ## Node sparkles

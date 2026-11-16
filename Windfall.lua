@@ -1214,6 +1214,7 @@ local FISH_ZONES = {
         "Azshara", "Moonglade" },
     [425] = { "Eastern Plaguelands", "Winterspring", "Burning Steppes", "Silithus", "Deadwind Pass" },
 }
+ns.FishZones = FISH_ZONES
 local zoneFishLevel = {}
 for level, zones in pairs(FISH_ZONES) do
     for _, zone in ipairs(zones) do zoneFishLevel[zone] = level end
@@ -4356,6 +4357,7 @@ local GATHER_ORDER = { 182, 186, 393, 356 }
 local SPARKLES = { { "sparkleHerb", "Herbs" }, { "sparkleOre", "Ore" }, { "sparkleFish", "Fishing pools" } }
 -- Professions with a crafting window, to open the window with.
 local CRAFT_LINES = { [171] = true, [164] = true, [333] = true, [202] = true, [165] = true, [197] = true, [185] = true, [129] = true }
+local RANK_CAP = { Journeyman = 150, Expert = 225, Artisan = 300 }
 local STRATA = { BACKGROUND = 1, LOW = 2, MEDIUM = 3, HIGH = 4, DIALOG = 5, FULLSCREEN = 6, FULLSCREEN_DIALOG = 7, TOOLTIP = 8 }
 
 -- ------------------------------------------------------------- widgets --
@@ -4532,6 +4534,105 @@ function NP.MyFishing()
     end
 end
 
+-- A character's professions by name, crafting and gathering together.
+function NP.Names(char)
+    local seen, names = {}, {}
+    for _, t in ipairs({ char.professions or {}, char.gathering or {} }) do
+        for name in pairs(t) do
+            if not seen[name] then
+                seen[name] = true
+                names[#names + 1] = name
+            end
+        end
+    end
+    table.sort(names)
+    return names
+end
+
+-- The profession picked for the character shown: its name, its crafting
+-- entry (recipes) and its gathering entry (skill, for the guide). Either
+-- can be missing: Herbalism has no recipes, Tailoring nothing to gather.
+function NP.Picked(char)
+    if not char then return nil end
+    local gathering = char.gathering or {}
+    if NP.gather and not gathering[NP.gather] then NP.gather = nil end
+    if not NP.gather and not char.professions[PB.view.prof or ""] then
+        NP.gather = PB.SortedKeys(gathering)[1] -- crafts nothing: its first gathering profession
+    end
+    local name = NP.gather or PB.view.prof
+    if not name then return nil end
+    return name, char.professions[name], gathering[name]
+end
+
+-- Picks a character and one of its professions.
+function NP.Pick(key, name, selected)
+    local char = db.chars and db.chars[key]
+    NP.offset, NP.selected, NP.reveal = 0, selected, selected ~= nil or nil
+    NP.gather = name and char and char.gathering and char.gathering[name] and name or nil
+    local crafts = name and char and char.professions[name]
+    PB.Choose(key, crafts and name or (key == PB.view.char and PB.view.prof) or nil)
+end
+
+-- The levelling guide of a gathering profession.
+function NP.Guide(g)
+    if g.line ~= FISHING_LINE then return ns.GatherGuides and ns.GatherGuides[g.line] end
+    if not NP.fishGuide then
+        local levels = {}
+        for level in pairs(ns.FishZones or {}) do levels[#levels + 1] = level end
+        table.sort(levels)
+        local steps, from = {}, 1
+        for _, level in ipairs(levels) do
+            steps[#steps + 1] = { from = from, to = level, zones = ns.FishZones[level], what = {},
+                note = level > 300
+                    and string.format("No fish get away here from %d skill: 300 with lures and a good pole on top. Below that some get away.", level)
+                    or string.format("No fish get away here from %d skill; below that some do. Lures and your pole count.", level) }
+            from = level
+        end
+        NP.fishGuide = { verb = "Catch", steps = steps,
+            ranks = { { rank = "Journeyman", skill = 50, level = 0 },
+                { rank = "Expert", skill = 125, level = 0, text = "buy the Expert book (Expert Fishing - The Bass and You, Booty Bay)" },
+                { rank = "Artisan", skill = 225, level = 35, text = "do the Artisan quest (Nat Pagle, Dustwallow Marsh)" } },
+            tip = "Every catch counts towards your next point, wherever you fish; where fewer fish get away, you catch more. The Fishing tab shows how many get away where you stand." }
+    end
+    return NP.fishGuide
+end
+
+-- The guide as the list: its stretches of skill, with the ranks to train on the way.
+function NP.GuideNodes(name, g, guide)
+    local skill, cap = g.skill or 1, g.max or 0
+    local char = (db.chars or {})[PB.view.char]
+    local items = {}
+    for i, st in ipairs(guide.steps) do items[#items + 1] = { at = st.from, order = 2, step = st, index = i } end
+    for _, r in ipairs(guide.ranks or {}) do
+        if (RANK_CAP[r.rank] or 0) > cap then items[#items + 1] = { at = r.skill, order = 1, rank = r } end
+    end
+    table.sort(items, function(a, b)
+        if a.at ~= b.at then return a.at < b.at end
+        return a.order < b.order
+    end)
+    local nodes = { { header = name .. ": where to level it" } }
+    local last = guide.steps[#guide.steps]
+    for _, item in ipairs(items) do
+        if item.rank then
+            local r = item.rank
+            local low = char and char.level and (r.level or 0) > char.level
+            nodes[#nodes + 1] = { text = string.format("|cffffd100%d|r  %s%s", r.skill, r.text or NP.RankText(r.rank, "trainer"),
+                low and string.format(" |cffff6060(level %d)|r", r.level) or "") }
+        else
+            local st = item.step
+            local current = skill >= st.from and (skill < st.to or st == last)
+            local names = {}
+            for _, w in ipairs(st.what) do names[#names + 1] = w[1] end
+            if #names == 0 then names = st.zones end
+            nodes[#nodes + 1] = { id = "guide" .. item.index, guide = st, current = current,
+                text = string.format("%s%s|r  %s%s|r", current and "|cffffd100" or "|cffaaaaaa",
+                    st.to > 300 and (st.from .. "+") or (st.from .. "-" .. st.to),
+                    (skill >= st.to and st ~= last) and "|cff808080" or "|cffffffff", table.concat(names, ", ")) }
+        end
+    end
+    return nodes
+end
+
 -- The character you are on, as the page opens.
 function NP.Home()
     local me = PB.CharacterKey()
@@ -4580,6 +4681,13 @@ function NP.Fill(id, recipe)
     recipe.item = recipe.item or read.item
     recipe.qty = read.qty or recipe.qty
     if #read.reagents > 0 then recipe.noReagents = nil end
+end
+
+-- How a rank is got: from a trainer, or for Cooking, First Aid and Fishing a book or a quest.
+function NP.RankText(rank, how)
+    if how == "vendor" then return "buy the " .. rank .. " book from a vendor" end
+    if how == "quest" then return "do the " .. rank .. " quest" end
+    return "train " .. rank .. " at a trainer"
 end
 
 function NP.ItemName(itemID)
@@ -4669,9 +4777,10 @@ function NP.Refresh()
     end
     if NoteCharacter then NoteCharacter() end -- this character's skills as the game has them now
     if NP.mode == "fishing" and not NP.MyFishing() then NP.mode = "recipes" end
-    local char, prof = NP.Selection()
+    local char = NP.Selection()
+    local name, prof, g = NP.Picked(char)
     NP.RefreshTabs()
-    NP.RefreshHeader(char, prof)
+    NP.RefreshHeader(char, name, prof, g)
     NP.RefreshChecks()
     local mode = NP.mode
     NP.craft:SetShown(NP.Crafting())
@@ -4679,7 +4788,7 @@ function NP.Refresh()
     NP.farming:SetShown(mode == "farming")
     NP.fishing:SetShown(mode == "fishing")
     if NP.Crafting() then
-        NP.DrawCraft(char, prof)
+        NP.DrawCraft(char, name, prof, g)
     elseif mode == "money" then
         NP.DrawMoney()
     elseif mode == "farming" then
@@ -4713,7 +4822,7 @@ function NP.RefreshTabs()
     end
 end
 
-function NP.RefreshHeader(char, prof)
+function NP.RefreshHeader(char, name, prof, g)
     local h = NP.header
     local crafting = NP.Crafting()
     for _, b in ipairs(h.icons) do b:Hide() end
@@ -4736,21 +4845,22 @@ function NP.RefreshHeader(char, prof)
         local color = char.class and RAID_CLASS_COLORS and RAID_CLASS_COLORS[char.class]
         if fs and color then fs:SetTextColor(color.r, color.g, color.b) end
         local last = h.char
-        for i, name in ipairs(PB.SortedKeys(char.professions)) do
+        for i, each in ipairs(NP.Names(char)) do
             local b = h.icons[i]
             if b then
-                local p = char.professions[name]
-                b.name, b.prof = name, p
-                b.icon:SetTexture(PB.ProfessionIcon(p))
-                b.icon:SetDesaturated(p.unloaded and true or false)
-                b.ring:SetShown(name == PB.view.prof)
+                local p, gathers = char.professions[each], (char.gathering or {})[each]
+                b.name, b.prof = each, p or gathers
+                b.icon:SetTexture(PB.ProfessionIcon(p or gathers))
+                b.icon:SetDesaturated(p and p.unloaded and not gathers and true or false)
+                b.ring:SetShown(each == name)
                 b:Show()
                 last = b
             end
         end
         h.barFrame:SetPoint("LEFT", last, "RIGHT", 14, 0)
-        shown, shownName, icon = prof, PB.view.prof, prof and PB.ProfessionIcon(prof)
-        title = (PB.view.prof or "Professions") .. " - " .. PB.DisplayName(PB.view.char)
+        shown = prof or g
+        shownName, icon = name, shown and PB.ProfessionIcon(shown)
+        title = (name or "Professions") .. " - " .. PB.DisplayName(PB.view.char)
     end
     h.barFrame:SetShown(shown ~= nil and shown.max ~= nil)
     if shown and shown.max then
@@ -4812,8 +4922,7 @@ function NP.ToggleMenu(anchor)
                     if StaticPopup_Show then StaticPopup_Show("WINDFALL_FORGET_CHARACTER", PB.DisplayName(self.key), nil, self.key) end
                     return
                 end
-                NP.offset, NP.selected = 0, nil
-                PB.Choose(self.key, self.prof or nil)
+                NP.Pick(self.key, self.prof or nil)
             end)
             row:SetScript("OnEnter", function(self)
                 if not self.forget then return end
@@ -4830,27 +4939,29 @@ function NP.ToggleMenu(anchor)
     end
     for _, key in ipairs(keys) do
         local char = db.chars[key]
-        local names = PB.SortedKeys(char.professions)
+        local names = NP.Names(char)
+        local picked = key == PB.view.char and NP.Picked(char) or nil
         local row = Row()
         row.key, row.forget = key, true
-        row.prof = (key == PB.view.char and PB.view.prof) or names[1] or false
+        row.prof = picked or names[1] or false
         row.icon:Hide()
         row.text:ClearAllPoints()
         row.text:SetPoint("LEFT", 6, 0)
         row.text:SetText(PB.ClassColored(char, key) .. (key == me and " |cff999999(you)|r" or ""))
         row.right:SetText(char.level and ("|cff999999level " .. char.level .. "|r") or "")
         for _, name in ipairs(names) do
-            local p = char.professions[name]
+            local p, gathers = char.professions[name], (char.gathering or {})[name]
+            local either = p or gathers
             local r = Row()
             r.key, r.prof, r.forget = key, name, false
             r.icon:Show()
-            r.icon:SetTexture(PB.ProfessionIcon(p))
-            r.icon:SetDesaturated(p.unloaded and true or false)
+            r.icon:SetTexture(PB.ProfessionIcon(either))
+            r.icon:SetDesaturated(p and p.unloaded and not gathers and true or false)
             r.text:ClearAllPoints()
             r.text:SetPoint("LEFT", 40, 0)
-            local current = key == PB.view.char and name == PB.view.prof
-            r.text:SetText((current and "|cffffd100" or "|cffffffff") .. name .. "|r")
-            r.right:SetText(p.unloaded and "|cff999999not read yet|r" or string.format("%d / %d", p.skill or 0, p.max or 0))
+            r.text:SetText((name == picked and "|cffffd100" or "|cffffffff") .. name .. "|r")
+            r.right:SetText((p and p.unloaded and not gathers) and "|cff999999not read yet|r"
+                or string.format("%d / %d", either.skill or 0, either.max or 0))
         end
         if #names == 0 then
             local r = Row()
@@ -4858,7 +4969,7 @@ function NP.ToggleMenu(anchor)
             r.icon:Hide()
             r.text:ClearAllPoints()
             r.text:SetPoint("LEFT", 40, 0)
-            r.text:SetText("|cff999999no crafting professions|r")
+            r.text:SetText("|cff999999no professions|r")
             r.right:SetText("")
         end
     end
@@ -4879,7 +4990,7 @@ function NP.BuildList(prof)
         nodes[#nodes + 1] = { header = string.format("Route %d to %d", prof.skill or 1, target) }
         for _, st in ipairs(steps) do
             if st.rank then
-                nodes[#nodes + 1] = { text = string.format("|cffffd100%d|r  %s", st.at, RankAction(st.rank, st.how)) }
+                nodes[#nodes + 1] = { text = string.format("|cffffd100%d|r  %s", st.at, NP.RankText(st.rank, st.how)) }
             else
                 local crafts = math.ceil(st.crafts - 0.001)
                 NP.Fill(st.p.id, st.p.recipe)
@@ -4933,8 +5044,10 @@ function NP.BuildList(prof)
     return nodes
 end
 
-function NP.DrawCraft(char, prof)
+function NP.DrawCraft(char, name, prof, g)
     local recipes = NP.mode == "recipes"
+    local guide = not recipes and g and NP.Guide(g) or nil
+    local route = false
     NP.search:SetShown(recipes)
     NP.listBox:ClearAllPoints()
     NP.listBox:SetPoint("TOPLEFT", 0, recipes and -30 or 0)
@@ -4944,20 +5057,31 @@ function NP.DrawCraft(char, prof)
     NP.list:SetPoint("BOTTOMRIGHT", -5, recipes and 6 or 36)
     if not char then
         NP.nodes = { { text = "|cff999999Nothing saved yet: open one of your professions once.|r" } }
+    elseif not name then
+        NP.nodes = { { text = "|cff999999" .. PB.DisplayName(PB.view.char) .. " has no professions.|r" } }
+    elseif guide then
+        NP.nodes = NP.GuideNodes(name, g, guide) -- gathering: where to level it
     elseif not prof then
-        NP.nodes = { { text = "|cff999999" .. PB.DisplayName(PB.view.char) .. " has no crafting professions.|r" } }
+        NP.nodes = { { text = "|cff999999" .. name .. " has no recipes.|r" },
+            { text = "|cff999999Levelling shows where to level it.|r" } }
     else
         SyncLearned(prof, PB.view.char) -- what the trainer taught since it was read
         if prof.unloaded and not next(prof.recipes) then
             NP.nodes = { { text = "|cff999999Recipes not read yet.|r" } }
         else
             NP.nodes = NP.BuildList(prof)
+            route = not recipes
         end
     end
     -- selection: the one picked, else the route's first step or the first recipe
     local found, index
     for i, n in ipairs(NP.nodes) do
         if n.id and n.id == NP.selected then found, index = n, i end
+    end
+    if not found then
+        for i, n in ipairs(NP.nodes) do
+            if n.current then found, index = n, i break end -- the stretch of the guide you are in
+        end
     end
     if not found then
         for i, n in ipairs(NP.nodes) do
@@ -4969,9 +5093,9 @@ function NP.DrawCraft(char, prof)
     if NP.reveal and index then NP.offset = math.max(0, index - 6) end
     NP.reveal = nil
     NP.DrawList()
-    NP.DrawDetail(prof)
+    NP.DrawDetail(prof, name, g)
     -- under the route: how far to plan, and what to buy for it
-    local planned = not recipes and prof ~= nil and NP.nodes[1].header ~= nil
+    local planned = route
     local further = planned and (NP.NextTarget(prof) or (PB.view.target and RouteTarget(prof.skill or 1))) or nil
     NP.plan:SetShown(further ~= nil)
     if further then NP.plan:SetText("Plan to " .. further) end
@@ -5092,9 +5216,55 @@ function NP.RowButton(i)
     return b
 end
 
-function NP.DrawDetail(prof)
+-- A stretch of a gathering guide: what to gather, with what each gives at
+-- your skill, and where.
+function NP.DrawGuide(name, g, st)
+    local gd = NP.detail.guide
+    local guide = NP.Guide(g)
+    local skill = g.skill or 1
+    gd.title:SetText(string.format("%s %s", name, st.to > 300 and (st.from .. "+") or (st.from .. " - " .. st.to)))
+    gd.status:SetText(skill < st.from and string.format("|cff999999From %d skill. You have %d.|r", st.from, skill)
+        or (skill >= st.to and st ~= guide.steps[#guide.steps]) and string.format("|cff999999Behind you: you have %d.|r", skill)
+        or string.format("|cff7fd36bWhere you are now, with %d.|r", skill))
+    gd.note:SetText(st.note or "")
+    local lines = {}
+    for _, w in ipairs(st.what) do
+        local past = skill - w[2]
+        local color, gives
+        if past < 0 then
+            color, gives = "|cffff6060", "needs " .. w[2]
+        elseif past < 25 then
+            color, gives = "|cffff8040", "a point every time"
+        elseif past < 50 then
+            color, gives = "|cffffff00", "a point most times"
+        elseif past < 100 then
+            color, gives = "|cff40bf40", "a point now and then"
+        else
+            color, gives = "|cff808080", "no skill any more"
+        end
+        lines[#lines + 1] = string.format("%s%s|r  |cff999999%s|r", color, w[1], gives)
+    end
+    gd.whatHead:SetText(#lines > 0 and ((guide.verb or "Gather") .. ":") or "")
+    gd.what:SetText(table.concat(lines, "\n"))
+    gd.where:SetText(table.concat(st.zones or {}, ", "))
+    gd.tip:SetText(guide.tip or "")
+    gd:Show()
+end
+
+function NP.DrawDetail(prof, name, g)
     local d = NP.detail
     local n = NP.selectedNode
+    if n and n.guide then
+        d.content:Hide()
+        d.create:Hide()
+        d.createAll:Hide()
+        d.empty:Hide()
+        d.load:Hide()
+        d.note:SetText("")
+        NP.DrawGuide(name, g, n.guide)
+        return
+    end
+    d.guide:Hide()
     if not (prof and n and n.recipe) then
         d.content:Hide()
         d.create:Hide()
@@ -5271,8 +5441,8 @@ function NP.OpenRecipe(e)
     local maker = e.makers[1]
     NP.search:SetText("") -- while still on Make money: no redraw yet
     NP.collapsed[e.recipe.cat or "Recipes"] = nil
-    NP.mode, NP.offset, NP.selected, NP.reveal = "recipes", 0, e.id, true
-    PB.Choose(maker.key, maker.prof)
+    NP.mode = "recipes"
+    NP.Pick(maker.key, maker.prof, e.id)
 end
 
 function NP.BuildMoney(parent)
@@ -5724,10 +5894,7 @@ function NP.Build(book)
         b.ring:SetTexture("Interface\\Buttons\\CheckButtonHilight")
         b.ring:SetBlendMode("ADD")
         b:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
-        b:SetScript("OnClick", function(self)
-            NP.offset, NP.selected = 0, nil
-            PB.Choose(PB.view.char, self.name)
-        end)
+        b:SetScript("OnClick", function(self) NP.Pick(PB.view.char, self.name) end)
         b:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
             GameTooltip:AddLine(self.name)
@@ -5876,6 +6043,34 @@ function NP.Build(book)
     c.costs:SetPoint("BOTTOMLEFT", 0, 18)
     c.costs:SetJustifyH("LEFT")
     c.costs:SetSpacing(4)
+    local gd = CreateFrame("Frame", nil, d)
+    gd:SetPoint("TOPLEFT", 16, -16)
+    gd:SetPoint("BOTTOMRIGHT", -16, 14)
+    gd:Hide()
+    gd.title = NP.Text(gd, "GameFontNormalLarge")
+    gd.title:SetPoint("TOPLEFT", 0, 0)
+    gd.status = NP.Text(gd, "GameFontHighlightSmall")
+    gd.status:SetPoint("TOPLEFT", gd.title, "BOTTOMLEFT", 0, -6)
+    local function Wrapped(font, anchor, gap)
+        local fs = gd:CreateFontString(nil, "OVERLAY", font)
+        fs:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, gap)
+        fs:SetPoint("RIGHT", gd, "RIGHT", 0, 0)
+        fs:SetJustifyH("LEFT")
+        fs:SetSpacing(4)
+        return fs
+    end
+    gd.note = Wrapped("GameFontHighlightSmall", gd.status, -10)
+    gd.whatHead = Wrapped("GameFontNormal", gd.note, -14)
+    gd.what = Wrapped("GameFontHighlight", gd.whatHead, -6)
+    local whereHead = Wrapped("GameFontNormal", gd.what, -14)
+    whereHead:SetText("Where:")
+    gd.where = Wrapped("GameFontHighlight", whereHead, -6)
+    gd.tip = gd:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    gd.tip:SetPoint("BOTTOMLEFT", 0, 0)
+    gd.tip:SetPoint("RIGHT", gd, "RIGHT", 0, 0)
+    gd.tip:SetJustifyH("LEFT")
+    gd.tip:SetSpacing(3)
+    d.guide = gd
     d.note = NP.Text(d, "GameFontHighlightSmall", "RIGHT")
     d.note:SetPoint("BOTTOMLEFT", 14, 40)
     d.note:SetPoint("BOTTOMRIGHT", -14, 40)
@@ -5995,7 +6190,10 @@ function NP.Attach()
             local line = base and SkillLineOf(base)
             local me = line and db.chars and db.chars[PB.CharacterKey()]
             for name, p in pairs(me and me.professions or {}) do
-                if p.line == line then PB.view.prof = name end
+                if p.line == line then
+                    PB.view.prof = name
+                    NP.gather = me.gathering and me.gathering[name] and name or nil
+                end
             end
         end
         NP.Refresh()

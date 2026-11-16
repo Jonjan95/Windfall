@@ -2,6 +2,17 @@
 
 All changes to Windfall, newest first. After an update, type `/reload` in game (or restart the game when the notes say so).
 
+## [0.2.44] - 2026-11-16
+
+- **Levelling guides for Herbalism, Mining, Skinning and Fishing.** Gathering professions now sit with the crafting ones in the header and in the character menu, for every character. On the Levelling tab they show a guide instead of a route:
+  - the stretches of skill, with the one you are in marked and the ranks to train on the way
+  - what to pick, mine or skin in each stretch, coloured by what it gives at your skill (a point every time, most times, now and then, or none)
+  - the zones to find it in
+  - for Fishing, the waters by the skill at which no fish get away, with the Expert book and the Artisan quest
+- The skill levels and zones are Classic's. On Recipes a gathering profession without recipes says so.
+- **Fix:** a levelling route that crossed a rank (Journeyman at 50, Expert at 125, Artisan at 200, or the First Aid and Cooking book and quest) threw an error in the profession window instead of showing the step.
+- First Aid's route is tested with its Expert book step.
+
 ## [0.2.43] - 2026-11-16
 
 - **Five tabs that never change:** Recipes, Levelling, Make money, Farming and Fishing sit under the profession window whatever you are looking at. (Fishing is there when the character you are on fishes.) The header's character and profession icons show on Recipes and Levelling, where they apply; Fishing and Farming are no longer icons among the professions.

@@ -154,7 +154,7 @@ Auctionator = { API = { v1 = { GetVendorPriceByItemID=function(_, id) if id == 2
 import os
 _ns = rt.eval('{}')
 _load = rt.eval('function(src, name) return assert(loadstring(src, name)) end')
-for _path in [os.path.join(os.path.dirname(os.path.abspath(sys.argv[2])), 'Data', n) for n in ('Recipes.lua', 'SkillUps.lua')] + [sys.argv[2]]:
+for _path in [os.path.join(os.path.dirname(os.path.abspath(sys.argv[2])), 'Data', n) for n in ('Recipes.lua', 'SkillUps.lua', 'Gathering.lua')] + [sys.argv[2]]:
     _load(open(_path, encoding='utf-8').read(), '=' + os.path.basename(_path))('Windfall', _ns)
 rt.globals().WF_NS = _ns
 print(rt.eval(r'''(function()
@@ -723,6 +723,47 @@ print(rt.eval(r'''(function()
   zg.professions.Alchemy.recipes[9001] = { name = "Test Potion", item = 118, qty = 1, reagents = { { 2447, 1 }, { 765, 1 }, { 3371, 1 } }, cat = "Potions" }
   WindfallDB.chars["Jonjan-Realm"].professions.Tailoring.recipes[9001] = zg.professions.Alchemy.recipes[9001]
   zg.professions.Alchemy.recipes[9002] = { name = "Losing Potion", item = 765, qty = 1, reagents = { { 118, 1 } } }
+  -- gathering professions: in the header and the menu, with a guide on Levelling
+  local gd = NP.detail.guide
+  local function guide() return tostring(gd.title.text).." | "..tostring(gd.status.text).." | "..tostring(gd.whatHead.text).." "..tostring(gd.what.text):gsub("\n", " / ").." | where: "..tostring(gd.where.text) end
+  zg.gathering.Herbalism = { skill = 137, max = 150, line = 182 }; zg.gathering.Skinning = { skill = 40, max = 75, line = 393 }
+  zg.gathering.Mining = { skill = 300, max = 300, line = 186 }
+  NP.header.char.onOnClick(NP.header.char)
+  local zgRows = {}; for _, r in ipairs(WindfallProfessionMenu.rows) do if r:IsShown() and r.key == "Zivv Gg-Realm" and not r.forget then zgRows[#zgRows+1] = tostring(r.text.text).." "..tostring(r.right.text) end end
+  out[#out+1] = "guide: Zivv Gg in the menu -> "..table.concat(zgRows, " || ")
+  pickMenu("Zivv Gg-Realm", "Herbalism")
+  out[#out+1] = "guide: Herbalism on Recipes -> icons=["..icons().."] bar="..tostring(NP.header.bar.text.text).." | "..rows()
+  go("levelling")
+  out[#out+1] = "guide: Herbalism on Levelling (137 of 150) -> plan="..tostring(NP.plan:IsShown()).." shopping list="..tostring(NP.shop:IsShown())
+  for _, b in ipairs(NP.headerPool) do if b:IsShown() then out[#out+1] = "      ["..tostring(b.label.text).."]" end end
+  for _, b in ipairs(NP.rowPool) do if b:IsShown() then out[#out+1] = "      "..tostring(b.text.text) end end
+  out[#out+1] = "      picked by itself: "..guide()
+  out[#out+1] = "      tip: "..tostring(gd.tip.text)
+  for _, b in ipairs(NP.rowPool) do if b:IsShown() and b.node.id == "guide5" then b.onOnClick(b) end end
+  out[#out+1] = "      a later stretch: "..guide()
+  NP.header.char.onOnClick(NP.header.char); pickMenu("Zivv Gg-Realm", "Skinning")
+  out[#out+1] = "guide: Skinning (40) -> "..rows()
+  out[#out+1] = "      "..guide()
+  NP.header.char.onOnClick(NP.header.char); pickMenu("Zivv Gg-Realm", "Mining")
+  out[#out+1] = "guide: Mining (300 of 300) -> "..rows()
+  out[#out+1] = "      "..guide()
+  NP.header.char.onOnClick(NP.header.char); pickMenu("Zivv Zniper-Realm", "Fishing")
+  out[#out+1] = "guide: Fishing (100 of 150) -> "..rows()
+  out[#out+1] = "      "..guide().." | note: "..tostring(gd.note.text)
+  -- a crafting profession still gets its route, and the guide's panel goes
+  NP.header.char.onOnClick(NP.header.char); pickMenu("Zivv Gg-Realm", "Alchemy")
+  out[#out+1] = "guide: back to Alchemy -> "..rows().." | guide panel shown="..tostring(gd:IsShown())
+  -- First Aid levels like any crafting profession, with its book and quest
+  local hc = WindfallDB.chars["Huntie-Realm"]
+  hc.professions["First Aid"] = { line = 129, skill = 120, max = 150, recipes = {
+    [3277] = { name = "Wool Bandage", item = 3530, qty = 1, reagents = { { 2318, 1 } }, diff = "optimal" },
+    [3278] = { name = "Heavy Wool Bandage", item = 3531, qty = 1, reagents = { { 2318, 2 } }, diff = "optimal" } } }
+  NP.header.char.onOnClick(NP.header.char); pickMenu("Huntie-Realm", "First Aid")
+  NP.plan.onOnClick(NP.plan)
+  out[#out+1] = "guide: First Aid 120, planned to 225 -> "..rows()
+  hc.professions["First Aid"] = nil; zg.gathering.Herbalism = nil; zg.gathering.Skinning = nil; zg.gathering.Mining = nil
+  NP.header.char.onOnClick(NP.header.char); pickMenu("Zivv Gg-Realm", "Alchemy")
+  go("recipes")
   go("money")
   local M = NP.money
   local function money() local t = {} for _, r in ipairs(M.rows) do if r:IsShown() then t[#t+1] = tostring(r.name.text).." | "..tostring(r.who.text).." | "..tostring(r.cost.text).." | "..tostring(r.value.text).." | "..tostring(r.profit.text).." | "..tostring(r.can.text) end end return t end
