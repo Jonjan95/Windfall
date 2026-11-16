@@ -3645,6 +3645,7 @@ local ahOpen = false
 local merchantOpen, merchantItems = false, {} -- the vendor window, and what it sells
 local ScanMerchant, ToBuy
 local RefreshShoppingList, DockToAuctionHouse, RankAction
+local RefreshDrawer, DrawerFollow
 
 local function BagCountOf(itemID)
     local count = (C_Item and C_Item.GetItemCount) or GetItemCount
@@ -3665,6 +3666,8 @@ local showing                   -- the item last shown: { id, qty }
 
 local function Status(text)
     if shopFrame then shopFrame.status:SetText(text or "") end
+    local d = _G.WindfallShoppingDrawer
+    if d and d.status then d.status:SetText(text or "") end
 end
 
 local function StopBuying(text)
@@ -3700,11 +3703,25 @@ local function OnBuyPage()
     return false
 end
 
--- Back to the Buy tab's list, as clicking the tab does. Asking for a new item
--- straight from another item's page can leave the auction house searching.
+-- Back to the Buy tab's list, as the Back button on an item's page does.
+-- Asking for a new item straight from another item's page leaves the auction
+-- house on that page without searching (it is "already" on a buy page). The
+-- Buy tab cannot be clicked for this: a selected tab is a disabled button.
 local function BackToBuyTab()
-    local tab = _G.AuctionHouseFrameBuyTab
-    if tab and tab.Click then pcall(tab.Click, tab) end
+    local ahFrame = _G.AuctionHouseFrame
+    local modes = _G.AuctionHouseFrameDisplayMode
+    if ahFrame and ahFrame.SetDisplayMode and modes and modes.Buy
+        and pcall(ahFrame.SetDisplayMode, ahFrame, modes.Buy) then
+        return
+    end
+    for _, key in ipairs({ "CommoditiesBuyFrame", "ItemBuyFrame" }) do
+        local page = ahFrame and ahFrame[key]
+        local back = type(page) == "table" and page.BackButton
+        if type(back) == "table" and back.IsShown and back:IsShown() and back.Click then
+            pcall(back.Click, back)
+            return
+        end
+    end
 end
 
 -- The auction house takes one request at a time; asking while it is busy
@@ -3768,34 +3785,17 @@ end
 local function OnAuctionEvent(event, ...)
     if event == "AUCTION_HOUSE_SHOW" then
         ahOpen = true
-        -- Next to the auction house, but only with something left to buy.
-        local anything
-        for _, item in ipairs(shop.items) do
-            if item.need * (shop.single and shop.crafts or 1) > BagCountOf(item.id) then anything = true end
-        end
-        if anything and shopFrame then
-            local already = shopFrame:IsShown()
-            shopFrame:Show()
-            -- The auction house frame is shown just after this event.
-            C_Timer.After(0, function() DockToAuctionHouse(not already) end)
-        end
+        -- The auction house frame is shown just after this event.
+        C_Timer.After(0, DrawerFollow)
     elseif event == "AUCTION_HOUSE_CLOSED" then
         ahOpen = false
         StopBuying()
         UndockPanel()
+        DrawerFollow()
     elseif event == "MERCHANT_SHOW" or event == "MERCHANT_UPDATE" then
         merchantOpen = true
         ScanMerchant()
-        -- Next to the vendor, when it sells something still to buy.
-        local wanted
-        for _, item in ipairs(shop.items) do
-            if merchantItems[item.id] and ToBuy(item) > 0 then wanted = true end
-        end
-        if event == "MERCHANT_SHOW" and wanted and shopFrame then
-            local already = shopFrame:IsShown()
-            shopFrame:Show()
-            if _G.MerchantFrame then DockPanel(_G.MerchantFrame, not already) end
-        end
+        if event == "MERCHANT_SHOW" then C_Timer.After(0, DrawerFollow) end
     elseif event == "NEW_RECIPE_LEARNED" or event == "LEARNED_SPELL_IN_TAB" or event == "TRAINER_UPDATE"
         or event == "SKILL_LINES_CHANGED" then
         -- Learned a recipe or a rank at the trainer: look again in a moment,
@@ -3808,6 +3808,7 @@ local function OnAuctionEvent(event, ...)
         merchantOpen = false
         merchantItems = {}
         UndockPanel()
+        DrawerFollow()
     elseif event == "ITEM_KEY_ITEM_INFO_RECEIVED" then
         local itemID = ...
         if showing and itemID == showing.id and OpenBuyPage() then
@@ -3829,6 +3830,7 @@ local function OnAuctionEvent(event, ...)
         end
     end
     if RefreshShoppingList then RefreshShoppingList() end
+    if RefreshDrawer then RefreshDrawer() end
 end
 
 -- -------------------------------------------------------------- vendor ------
@@ -4225,6 +4227,7 @@ local auctionEvents = CreateFrame("Frame")
 auctionEvents:SetScript("OnEvent", function(_, event, ...)
     if event == "BAG_UPDATE_DELAYED" then
         if RefreshShoppingList then RefreshShoppingList() end
+        if RefreshDrawer then RefreshDrawer() end
     else
         OnAuctionEvent(event, ...)
     end
@@ -4331,9 +4334,315 @@ function ShowRoute(prof, profName, target, charKey)
 end
 
 function RebuildRoute()
-    if shop.single or not shop.route or not (shopFrame and shopFrame:IsShown()) then return end
+    if shop.single or not shop.route then return end
     FillRoute(true)
     RefreshShoppingList()
+    if RefreshDrawer then RefreshDrawer() end
+end
+
+-- ------------------------------------------------------------- drawer ------
+
+-- The shopping list as a drawer on the side of the window you are at: the
+-- auction house, a vendor, or the profession window. At the auction house
+-- and vendors a small Windfall tab on the window's edge pulls it out and
+-- pushes it back in; it remembers whether you left it open. It lists what
+-- the route of the profession picked in Windfall still needs: Show at the
+-- auction house, Buy at a vendor that sells it.
+local drawer
+local DRAWER_ROWS = 15
+local DRAWER_W = 300
+
+-- The window the drawer sits on now.
+local function DrawerHost()
+    local ah, merchant = _G.AuctionHouseFrame, _G.MerchantFrame
+    if ahOpen and ah and ah:IsShown() then return ah, true end
+    if merchantOpen and merchant and merchant:IsShown() then return merchant, true end
+    local book = _G.ProfessionsFrame
+    if drawer and drawer.fromBook and book and book:IsShown() then return book, false end
+end
+
+-- The route of the profession picked in Windfall, up to its target.
+local function DrawerRoute()
+    if shop.single or not CurrentSelection then return end
+    local _, prof, view = CurrentSelection()
+    if not (prof and view.prof) then return end
+    local target = view.target or RouteTarget(prof.skill or 1)
+    local r = shop.route
+    if not r or r.char ~= view.char or r.name ~= view.prof or r.target ~= target then
+        shop.route = { char = view.char, name = view.prof, target = target }
+        FillRoute(true)
+    end
+end
+
+function RefreshDrawer()
+    if not drawer then return end
+    local host, hasTab = DrawerHost()
+    drawer.tab:SetShown(hasTab and host ~= nil)
+    if host then
+        drawer.tab:SetParent(host)
+        drawer.tab:ClearAllPoints()
+        drawer:SetParent(host)
+        drawer:ClearAllPoints()
+        -- past the profession window's side tabs; on the edge of the others
+        drawer:SetPoint("TOPLEFT", host, "TOPRIGHT", hasTab and 2 or 50, -24)
+        drawer:SetPoint("BOTTOMLEFT", host, "BOTTOMRIGHT", hasTab and 2 or 50, 24)
+        drawer:SetFrameStrata(host:GetFrameStrata() or "MEDIUM")
+        drawer.tab:SetFrameStrata(host:GetFrameStrata() or "MEDIUM")
+    end
+    local open = host ~= nil and (not hasTab or db.drawerOpen == true)
+    if hasTab and host then
+        if open then
+            drawer.tab:SetPoint("TOPLEFT", drawer, "TOPRIGHT", -2, -20)
+        else
+            drawer.tab:SetPoint("TOPLEFT", host, "TOPRIGHT", -2, -44)
+        end
+    end
+    if not open then drawer:Hide() return end
+    if not drawer:IsShown() then
+        drawer:Show()
+        if drawer.fade then drawer.fade:Play() end -- a quick fade in
+    end
+    DrawerRoute()
+    local f = drawer
+    f.title:SetText(shop.title ~= "" and shop.title or "Shopping list")
+    local r = shop.route
+    f.who:SetText(r and not shop.single and (CharacterKeyNow and r.char ~= CharacterKeyNow()
+        and ("|cffff8040For " .. (db.chars[r.char] and db.chars[r.char].name or r.char) .. ", not you|r") or "") or "")
+    -- how far to plan
+    local further
+    if r and not shop.single then
+        for _, t in ipairs(ROUTE_TARGETS) do
+            if t > r.target then further = t break end
+        end
+    end
+    f.plan:SetShown(further ~= nil)
+    if further then f.plan:SetText("Plan to " .. further) end
+    f.plan.target = further or false
+    local total, missing, anyVendor, shown, done = 0, false, false, 0, 0
+    for _, item in ipairs(shop.items) do
+        local need = item.need * (shop.single and shop.crafts or 1)
+        local have = HereCount(item.id)
+        local buy = math.max(0, need - have)
+        local price, fromVendor = ReagentPrice(item.id)
+        if buy > 0 then
+            if price then total = total + price * buy else missing = true end
+        else
+            done = done + 1
+        end
+        shown = shown + 1
+        local row = f.rows[shown]
+        if row then
+            row.icon:SetTexture(ItemIcon(item.id))
+            row.icon:SetDesaturated(buy == 0)
+            row.name:SetText((buy == 0 and "|cff808080" or "|cffffffff") .. ItemName(item.id) .. "|r")
+            row.count:SetText(string.format("%s%d/%d|r", have >= need and "|cff7fd36b" or "|cffffffff", math.min(have, need), need))
+            row.cost:SetText(buy == 0 and "" or (price and Money(price * buy) or "|cffff6060?|r"))
+            row.item, row.toBuy, row.itemID = item.id, buy, item.id
+            row.vendor = merchantOpen and merchantItems[item.id] ~= nil
+            if buy == 0 then
+                row.act:Hide()
+            elseif row.vendor then
+                anyVendor = true
+                row.act:SetText("Buy " .. buy)
+                row.act:SetEnabled(true)
+                row.act:Show()
+            elseif ahOpen then
+                local cheaperElsewhere = fromVendor and price
+                row.act:SetText(cheaperElsewhere and "Vendor" or ((showing and showing.id == item.id) and "|cff7fd36bShown|r" or "Show"))
+                row.act:SetEnabled(not cheaperElsewhere)
+                row.act:Show()
+            else
+                row.act:Hide()
+            end
+            row:Show()
+        end
+    end
+    for i = shown + 1, #f.rows do f.rows[i]:Hide() end
+    local hint
+    if not r and not shop.single then
+        hint = "Pick a crafting profession in Windfall (the profession window's Windfall tab) and its route shows here."
+    elseif #shop.items == 0 then
+        hint = shop.now and shop.now.load and "Open this profession once so Windfall can read its recipes."
+            or "Nothing to buy for this route."
+    elseif done == #shop.items then
+        hint = "|cff7fd36bYou have everything for this route.|r"
+    elseif shown > #f.rows then
+        hint = string.format("+ %d more, as the route gets there.", shown - #f.rows)
+    end
+    f.hint:ClearAllPoints()
+    f.hint:SetPoint("TOPLEFT", f.list, "TOPLEFT", 4, -math.min(shown, #f.rows) * 22 - 6)
+    f.hint:SetPoint("RIGHT", f, "RIGHT", -14, 0)
+    f.hint:SetText(hint or "")
+    f.sum:SetText(#shop.items > 0 and ("Left to buy: " .. Money(total) .. (missing and " |cffff6060+ ?|r" or "")) or "")
+    f.buyAll:SetShown(anyVendor)
+end
+
+local function BuildDrawer()
+    local f = CreateFrame("Frame", "WindfallShoppingDrawer", UIParent, "BackdropTemplate")
+    f:SetWidth(DRAWER_W)
+    f:Hide()
+    f:EnableMouse(true)
+    if f.SetBackdrop then
+        f:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+            edgeSize = 20, insets = { left = 5, right = 5, top = 5, bottom = 5 } })
+        f:SetBackdropColor(0.06, 0.05, 0.04, 0.96)
+    end
+    f.fromBook, f.fade = false, false
+    local group = f.CreateAnimationGroup and f:CreateAnimationGroup()
+    if type(group) == "table" then
+        local a = group:CreateAnimation("Alpha")
+        if type(a) == "table" then
+            a:SetFromAlpha(0)
+            a:SetToAlpha(1)
+            a:SetDuration(0.15)
+            f.fade = group
+        end
+    end
+    f.title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    f.title:SetPoint("TOPLEFT", 16, -16)
+    f.title:SetPoint("RIGHT", -16, 0)
+    f.title:SetJustifyH("LEFT")
+    f.title:SetWordWrap(false)
+    f.who = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    f.who:SetPoint("TOPLEFT", f.title, "BOTTOMLEFT", 0, -4)
+    f.plan = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    f.plan:SetSize(96, 20)
+    f.plan.target = false
+    f.plan:SetPoint("TOPRIGHT", -12, -32)
+    f.plan:SetScript("OnClick", function(self)
+        local _, _, view = CurrentSelection()
+        if view and self.target then
+            view.target = self.target
+            RefreshDrawer()
+        end
+    end)
+    f.plan:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:AddLine("How far to plan")
+        GameTooltip:AddLine("The list covers the route to your next skill cap. Click to plan further.", 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    f.plan:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    local head = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    head:SetPoint("TOPLEFT", 16, -62)
+    head:SetText("Materials")
+    local headHave = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    headHave:SetPoint("TOPRIGHT", -136, -62)
+    headHave:SetText("Have")
+    f.list = CreateFrame("Frame", nil, f)
+    f.list:SetPoint("TOPLEFT", 10, -78)
+    f.list:SetPoint("RIGHT", -10, 0)
+    f.list:SetHeight(DRAWER_ROWS * 22)
+    f.rows = {}
+    for i = 1, DRAWER_ROWS do
+        local row = CreateFrame("Button", nil, f.list)
+        row:SetHeight(22)
+        row:SetPoint("TOPLEFT", 0, -(i - 1) * 22)
+        row:SetPoint("RIGHT", f.list, "RIGHT", 0, 0)
+        row.icon = row:CreateTexture(nil, "ARTWORK")
+        row.icon:SetSize(18, 18)
+        row.icon:SetPoint("LEFT", 4, 0)
+        row.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+        row.act = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+        row.act:SetSize(58, 18)
+        row.act:SetPoint("RIGHT", -2, 0)
+        row.act:SetScript("OnClick", function()
+            if row.vendor then
+                local cost = BuyFromVendor(row.item, row.toBuy)
+                if cost > 0 then Status("Bought " .. row.toBuy .. " " .. ItemName(row.item) .. " for " .. Money(cost) .. ".") end
+            else
+                ShowInAuctionHouse(row.item, row.toBuy)
+            end
+            RefreshDrawer()
+        end)
+        row.cost = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row.cost:SetPoint("RIGHT", row.act, "LEFT", -6, 0)
+        row.count = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row.count:SetPoint("RIGHT", -126, 0)
+        row.name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row.name:SetPoint("LEFT", row.icon, "RIGHT", 6, 0)
+        row.name:SetPoint("RIGHT", row.count, "LEFT", -6, 0)
+        row.name:SetJustifyH("LEFT")
+        row.name:SetWordWrap(false)
+        if i % 2 == 0 then
+            local stripe = row:CreateTexture(nil, "BACKGROUND")
+            stripe:SetAllPoints()
+            stripe:SetColorTexture(1, 1, 1, 0.03)
+        end
+        row:SetScript("OnEnter", function(self)
+            if self.itemID then
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:SetItemByID(self.itemID)
+                if self.toBuy and self.toBuy > 0 then GameTooltip:AddLine("Still to buy: " .. self.toBuy, 1, 1, 1) end
+                GameTooltip:Show()
+            end
+        end)
+        row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        f.rows[i] = row
+    end
+    f.hint = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    f.hint:SetJustifyH("LEFT")
+    f.status = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    f.status:SetPoint("BOTTOMLEFT", 16, 14)
+    f.status:SetPoint("RIGHT", -16, 0)
+    f.status:SetJustifyH("LEFT")
+    f.sum = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    f.sum:SetPoint("BOTTOMLEFT", 16, 40)
+    f.buyAll = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    f.buyAll:SetSize(100, 20)
+    f.buyAll:SetPoint("BOTTOMRIGHT", -12, 36)
+    f.buyAll:SetText("Buy all here")
+    f.buyAll:SetScript("OnClick", function() BuyAllHere() RefreshDrawer() end)
+
+    -- The tab on the window's edge that pulls the drawer out and pushes it back.
+    local tab = CreateFrame("Button", "WindfallShoppingDrawerTab", UIParent)
+    tab:SetSize(36, 40)
+    tab:Hide()
+    local bg = tab:CreateTexture(nil, "BACKGROUND")
+    bg:SetAllPoints()
+    bg:SetColorTexture(0.08, 0.07, 0.05, 0.95)
+    local edge = tab:CreateTexture(nil, "BORDER")
+    edge:SetPoint("TOPLEFT", -1, 1)
+    edge:SetPoint("BOTTOMRIGHT", 1, -1)
+    edge:SetColorTexture(0.6, 0.5, 0.25, 1)
+    tab.icon = tab:CreateTexture(nil, "ARTWORK")
+    tab.icon:SetSize(28, 28)
+    tab.icon:SetPoint("CENTER")
+    tab.icon:SetTexture("Interface\\AddOns\\Windfall\\Media\\icon")
+    tab:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+    tab:SetScript("OnClick", function()
+        db.drawerOpen = not db.drawerOpen
+        if SOUNDKIT and SOUNDKIT.IG_CHARACTER_INFO_TAB then PlaySound(SOUNDKIT.IG_CHARACTER_INFO_TAB) end
+        RefreshDrawer()
+    end)
+    tab:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:AddLine("Windfall shopping list")
+        GameTooltip:AddLine("What your levelling route still needs, with Show at the auction house and Buy at vendors.", 1, 1, 1, true)
+        GameTooltip:AddLine("Click: " .. (db.drawerOpen and "push it back in" or "pull it out"), 0.6, 0.6, 0.6)
+        GameTooltip:Show()
+    end)
+    tab:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    f.tab = tab
+    drawer = f
+    return f
+end
+
+-- The profession window's Shopping list button: the drawer beside it.
+function ns.ToggleShopDrawer()
+    drawer = drawer or BuildDrawer()
+    drawer.fromBook = not drawer.fromBook
+    RefreshDrawer()
+end
+
+-- The auction house or a vendor opened or closed: the drawer follows.
+function DrawerFollow()
+    drawer = drawer or BuildDrawer()
+    if not (ahOpen or merchantOpen) then
+        drawer.tab:Hide()
+        if not drawer.fromBook then drawer:Hide() end
+    end
+    RefreshDrawer()
 end
 end
 
@@ -6398,17 +6707,8 @@ function NP.Build(book)
     NP.Tooltip(NP.plan, "How far to plan", "The route goes to your next skill cap. Click to plan to the cap after it.")
     NP.shop = NP.Button(listBox, "Shopping list", 120)
     NP.shop:SetPoint("BOTTOMRIGHT", -8, 8)
-    NP.shop:SetScript("OnClick", function()
-        if PageOpeners.route then PageOpeners.route() end
-        DockPanel(book, true)
-        -- past the side tabs
-        local panel = _G.WindfallPanel
-        if panel then
-            panel:ClearAllPoints()
-            panel:SetPoint("TOPLEFT", book, "TOPRIGHT", 52, 0)
-        end
-    end)
-    NP.Tooltip(NP.shop, "Shopping list", "Every material for the route, with Show at the auction house and Buy at vendors. It moves next to the auction house or a vendor when you visit one.")
+    NP.shop:SetScript("OnClick", function() ns.ToggleShopDrawer() end)
+    NP.Tooltip(NP.shop, "Shopping list", "Every material for the route, beside this window. At the auction house and at vendors it is a drawer on their side, with Show and Buy.")
 
     local d = NP.Box(craft)
     d:SetPoint("TOPLEFT", LIST_W + 16, 0)
@@ -6760,6 +7060,7 @@ ns.dev = {
     ToggleSettings = function() ToggleSettings() end,
     ToggleHistory = function() ToggleHistory() end,
     OpenFarming = function() PageOpeners.farming() end,
+    OpenRoute = function() PageOpeners.route() end,
 }
 
 local FISH_OPTIONS = {

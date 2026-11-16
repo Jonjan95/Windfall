@@ -481,18 +481,20 @@ print(rt.eval(r'''(function()
   -- a second item while still on the first item's buy page, with a busy auction house
   local cbf = CreateFrame("Frame"); cbf.shown = true; cbf.BuyDisplay = display
   AuctionHouseFrame.CommoditiesBuyFrame = cbf
-  tabClicks = 0; AuctionHouseFrameBuyTab = { Click = function() tabClicks = tabClicks + 1; cbf.shown = false end }
+  tabClicks = 0; AuctionHouseFrameBuyTab = { Click = function() end } -- selected: a disabled button, clicking does nothing
+  AuctionHouseFrameDisplayMode = { Buy = { "BrowseResultsFrame" } }
+  AuctionHouseFrame.SetDisplayMode = function(self, mode) if mode == AuctionHouseFrameDisplayMode.Buy then tabClicks = tabClicks + 1; cbf.shown = false end end
   ahReady = false; C_AuctionHouse.IsThrottledMessageSystemReady = function() return ahReady end
   selected = nil; knownKeys[2320] = { isCommodity = true }
   local row2; for i = 1, 6 do if S.rows[i]:IsShown() and S.rows[i].item ~= row.item and S.rows[i].buy:IsShown() then row2 = S.rows[i] break end end
   if not row2 then row2 = row; out[#out+1] = "ah: (only one row to show, reusing it)" end
   row2.buy.onOnClick(row2.buy); runTimers()
-  out[#out+1] = "ah: second item, busy auction house -> tab clicks="..tabClicks.." selected="..tostring(selected).." status: "..tostring(S.status.text)
+  out[#out+1] = "ah: second item, busy auction house -> back to the list="..tabClicks.." selected="..tostring(selected).." status: "..tostring(S.status.text)
   ahReady = true; ev2(S, "AUCTION_HOUSE_THROTTLED_SYSTEM_READY")
   out[#out+1] = "ah: auction house ready -> selected="..tostring(selected).." status: "..tostring(S.status.text)
   -- no listings arrive: one retry after 4 s
   selected = nil; runTimers(); runTimers()
-  out[#out+1] = "ah: no listings came -> retried, tab clicks="..tabClicks.." selected again="..tostring(selected)
+  out[#out+1] = "ah: no listings came -> retried, back to the list="..tabClicks.." selected again="..tostring(selected)
   ev2(S, "AUCTION_HOUSE_CLOSED"); sh("AH closed")
   -- vendor buying and crafting from the route window
   local S = WindfallShoppingFrame
@@ -608,8 +610,24 @@ print(rt.eval(r'''(function()
   WF_NS.dev.TogglePanel(); pn("Windfall icon again")
   -- at a vendor with the panel closed: it opens next to the vendor, and closes again after
   merchant = { 2320 }; MerchantFrame.shown = true; bags[2320] = 0
-  ev2(nil, "MERCHANT_SHOW"); pn("vendor opens (route has thread to buy)")
+  AuctionHouseFrame.shown = false; ev2(nil, "AUCTION_HOUSE_CLOSED")
+  ev2(nil, "MERCHANT_SHOW"); runTimers(); pn("vendor opens (route has thread to buy)")
+  local DR, DT = WindfallShoppingDrawer, WindfallShoppingDrawerTab
+  local function drawerRows() local t = {} for _, r in ipairs(DR.rows) do if r:IsShown() then t[#t+1] = tostring(r.name.text).." "..tostring(r.count.text).." "..tostring(r.cost.text).." ["..(r.act:IsShown() and tostring(r.act.text) or "-").."]" end end return table.concat(t, " | ") end
+  out[#out+1] = "drawer: vendor opens -> tab shown="..tostring(DT:IsShown()).." drawer shown="..tostring(DR:IsShown()).." (closed until pulled out)"
+  DT.onOnClick(DT)
+  out[#out+1] = "drawer: tab clicked -> drawer shown="..tostring(DR:IsShown()).." | "..tostring(DR.title.text).." | "..tostring(DR.sum.text).." | buy all="..tostring(DR.buyAll:IsShown())
+  out[#out+1] = "      "..drawerRows()
   ev2(nil, "MERCHANT_CLOSED"); MerchantFrame.shown = false; pn("vendor closes")
+  out[#out+1] = "drawer: vendor closes -> tab shown="..tostring(DT:IsShown()).." drawer shown="..tostring(DR:IsShown()).." remembers open="..tostring(WindfallDB.drawerOpen)
+  -- the auction house: the drawer comes out by itself, as it was left
+  AuctionHouseFrame.shown = true; ev2(nil, "AUCTION_HOUSE_SHOW"); runTimers()
+  out[#out+1] = "drawer: auction house opens -> tab shown="..tostring(DT:IsShown()).." drawer shown="..tostring(DR:IsShown())
+  out[#out+1] = "      "..drawerRows()
+  DT.onOnClick(DT)
+  out[#out+1] = "drawer: tab clicked again -> drawer shown="..tostring(DR:IsShown()).." remembers open="..tostring(WindfallDB.drawerOpen)
+  AuctionHouseFrame.shown = false; ev2(nil, "AUCTION_HOUSE_CLOSED")
+  out[#out+1] = "drawer: auction house closes -> tab shown="..tostring(DT:IsShown()).." drawer shown="..tostring(DR:IsShown())
   B.sparkle.onOnClick(B.sparkle); out[#out+1] = "bar: sparkle click -> sparkle="..tostring(WindfallDB.sparkle).." dim="..tostring(B.sparkle.icon.desat)
   B.sparkle.onOnClick(B.sparkle)
   -- logging in on a new character (a priest with Enchanting and Tailoring, nothing opened yet)
@@ -620,8 +638,7 @@ print(rt.eval(r'''(function()
   ev(nil, "SKILL_LINES_CHANGED"); runTimers()
   local c = WindfallDB.chars["Jonjan-Realm"]
   out[#out+1] = "priest: listed at login -> "..tostring(c ~= nil).." professions: "..(c and ((c.professions.Enchanting and "Enchanting "..c.professions.Enchanting.skill.." unloaded="..tostring(c.professions.Enchanting.unloaded)) or "-") or "-")
-  if WindfallPanel.shown then WF_NS.dev.TogglePanel() end
-  WF_NS.dev.TogglePanel()
+  WF_NS.dev.OpenRoute()
   local H2 = WindfallPanel.header
   local S2 = WindfallShoppingFrame
   -- this test session has picked Huntie by hand earlier; pick the priest the same way

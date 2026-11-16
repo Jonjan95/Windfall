@@ -32,6 +32,7 @@ Levelling takes the cheapest way up from your skill. It mixes the recipes you kn
 The **Levelling** tab plays that forward for the picked profession, up to the next skill cap (the shopping list's **Plan to 150** plans further): every step up to the target, the ranks to train on the way (or the book or quest for Cooking and First Aid, and a note when your level is too low), and all the materials with a spare for unlucky skill-ups, in the shopping list:
 
 - **The route:** every step with how many to craft; pick one to see its reagents and Create it. It moves on by itself as your skill goes up, when you learn a recipe and when you train a rank.
+- **The shopping list is a drawer:** at the auction house and at vendors, click the Windfall tab on the window's right edge to pull it out (and again to push it back in). *Shopping list* on the Levelling tab opens it beside the profession window.
 - **At the auction house:** **Show** opens a material's page in the auction house with the amount you still need filled in; you press Buy Now there.
 - **At a vendor:** **Buy** buys what you still need of anything the vendor sells, and **Buy all here** buys all of it at once.
 

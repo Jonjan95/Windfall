@@ -2,6 +2,15 @@
 
 All changes to Windfall, newest first. After an update, type `/reload` in game (or restart the game when the notes say so).
 
+## [0.2.50] - 2026-11-16
+
+- **Shopping list as a drawer.** At the auction house and at vendors a small Windfall tab sits on the window's right edge. Click it to pull the shopping list out beside the window and click again to push it back in; it stays as you left it the next time. No second window opens by itself any more.
+  - It lists what the route of the profession picked in Windfall still needs: have / need, what is left to buy and its cost.
+  - *Show* at the auction house, *Buy* at a vendor that sells it, and *Buy all here*. Materials that are cheaper from a vendor say *Vendor* at the auction house.
+  - *Plan to 150 / 225 / 300* extends the list.
+  - *Shopping list* on the Levelling tab opens the same drawer beside the profession window.
+- **Fix: Show after buying.** After buying something at the auction house, the next *Show* left the auction house on the old item's page without searching, until you closed and reopened it. Windfall went back to the list by clicking the Buy tab, but the auction house keeps that tab disabled while you are on an item's page. It now goes back the way the page's own Back button does, so every *Show* searches.
+
 ## [0.2.49] - 2026-11-16
 
 - **Farming tab:** the farming mode button and its two sliders no longer sit on top of the node sparkle switches. Everything under the zones is one column now: node sparkles, then farming mode with *Map terrain* and *Map size*, then the button. *Clear* moved up next to the zones' title, and the zone list shows the best 6.
