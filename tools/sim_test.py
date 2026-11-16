@@ -938,6 +938,24 @@ print(rt.eval(r'''(function()
   out[#out+1] = "hud: off -> skin border alpha back="..tostring(border.alpha); Minimap.GetChildren = nil; SlashCmdList.WINDFALL("hud terrain 0")
   out[#out+1] = "hud: off -> pin label shown="..tostring(pin.windfallLabel:IsShown()).." pin takes mouse again="..tostring(pin.mouse)
   out[#out+1] = "hud: combat over -> overlay shown="..tostring(WindfallFarmHud:IsShown()).." map back="..tostring(Minimap.parent == UIParent).." alpha="..tostring(Minimap.alpha).." rotate="..tostring(cvars.rotateMinimap)
+  -- buff food reminder
+  do
+    local auras = {}
+    C_UnitAuras = { GetAuraDataByIndex = function(_, i) return auras[i] end }
+    local wasCombat = combat; combat = false
+    local function food(label)
+      local f = WindfallFoodReminder
+      out[#out+1] = "food: "..label.." -> "..((f and f:IsShown()) and tostring(f.text.text) or "hidden")
+    end
+    SlashCmdList.WINDFALL("food"); food("switched on, no buff")
+    auras[1] = { name = "Food", expirationTime = now + 20 }; WF_NS.FoodRefresh(); food("eating")
+    auras[1] = { name = "Well Fed", expirationTime = now + 900 }; WF_NS.FoodRefresh(); food("Well Fed, 15 min left")
+    auras[1].expirationTime = now + 25; WF_NS.FoodRefresh(); food("25 s left")
+    combat = true; auras[1] = nil; WF_NS.FoodRefresh(); food("buff gone in combat")
+    combat = false; WF_NS.FoodRefresh(); food("combat over")
+    SlashCmdList.WINDFALL("food"); food("switched off")
+    combat = wasCombat; C_UnitAuras = nil
+  end
   GetProfessionInfo = oldGPI3; playerSurname = nil; player = "Huntie"; class = "HUNTER"; containers = {}
   return table.concat(out, "\n")
 end)()''').replace("|cffffd700g|r","g").replace("|cffc7c7cfs|r","s").replace("|cffeda55fc|r","c"))

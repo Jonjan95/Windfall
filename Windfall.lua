@@ -2093,6 +2093,11 @@ local SETTINGS = {
     { key = "sparkleFish", label = "    Fishing pools", after = function() SparkleRecheck() end },
     { key = "interactDefault", label = "Interact back to game default when Windfall is done",
         tip = "When the line comes in or sparkles are switched off, the interact key goes to the game's defaults (10 yards, in front of you) instead of what was set before. Windfall leaves it alone the rest of the time." },
+    { header = "Reminders" },
+    { label = "Remind me to eat buff food",
+        tip = "A note on screen while you have no Well Fed buff, and a countdown for its last 30 seconds. Quiet in combat, while eating and while resting in a city or inn. Drag the note to move it.",
+        get = function() return db.foodRemind end,
+        set = function(value) db.foodRemind = value and true or false if ns.FoodRefresh then ns.FoodRefresh() end end },
     { header = "Window" },
     { label = "Show the Windfall bar",
         tip = "The small bar with your gold per hour and the fishing and sparkle switches.",
@@ -7256,6 +7261,152 @@ watcher:SetScript("OnEvent", function(_, event, name)
 end)
 end
 
+-- ------------------------------------------------------- food reminder ----
+
+-- Buff food reminder: a small note on screen while you have no Well Fed buff,
+-- and a warning with a countdown for its last 30 seconds. Off until switched
+-- on (Settings, or /wf food). It keeps quiet in combat, while you are eating,
+-- dead, on a flight path or resting in a city or inn.
+do
+local FOOD = { last = false, ends = 0, eating = false, state = "", since = 0 }
+local WARN_AT = 30
+local EATING = { ["food"] = true, ["drink"] = true, ["food & drink"] = true, ["refreshment"] = true }
+
+local function Call(name, ...)
+    local fn = _G[name]
+    if type(fn) == "function" then return fn(...) end
+end
+
+-- Reads your buffs: Well Fed (or the buff named with /wf food name) and when
+-- it ends, and whether you are eating. The game hides buffs from addons at
+-- times (in combat on some clients); then what was seen last stands.
+local function Scan()
+    local A = _G.C_UnitAuras
+    if not (type(A) == "table" and A.GetAuraDataByIndex) then return end
+    local wellFed = _G.C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(19705)
+    wellFed = type(wellFed) == "string" and wellFed:lower() or "well fed"
+    local custom = type(db.foodBuff) == "string" and db.foodBuff ~= "" and db.foodBuff or nil
+    local ok = pcall(function()
+        local found, ends, eating = false, 0, false
+        for i = 1, 80 do
+            local aura = A.GetAuraDataByIndex("player", i, "HELPFUL")
+            if not aura then break end
+            local name = type(aura.name) == "string" and aura.name:lower() or ""
+            if EATING[name] then eating = true end
+            if name == wellFed or name:find("well fed", 1, true) or (custom and name:find(custom, 1, true)) then
+                found = true
+                ends = math.max(ends, tonumber(aura.expirationTime) or 0)
+            end
+        end
+        FOOD.last, FOOD.ends, FOOD.eating = found, ends, eating
+    end)
+    return ok
+end
+
+local function Build()
+    local f = CreateFrame("Frame", "WindfallFoodReminder", UIParent)
+    f:SetSize(260, 34)
+    local pos = db.foodPos
+    if type(pos) == "table" and pos[1] then
+        f:SetPoint(pos[1], UIParent, pos[1], pos[2] or 0, pos[3] or 0)
+    else
+        f:SetPoint("TOP", UIParent, "TOP", 0, -170)
+    end
+    f:SetFrameStrata("HIGH")
+    f:EnableMouse(true)
+    f:SetMovable(true)
+    f:RegisterForDrag("LeftButton")
+    f:SetScript("OnDragStart", function(self) self:StartMoving() end)
+    f:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        local point, _, _, x, y = self:GetPoint(1)
+        if type(point) == "string" then db.foodPos = { point, x, y } end
+    end)
+    f.icon = f:CreateTexture(nil, "ARTWORK")
+    f.icon:SetSize(30, 30)
+    f.icon:SetPoint("LEFT", 0, 0)
+    f.icon:SetTexture("Interface\\Icons\\INV_Misc_Food_15")
+    f.text = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    f.text:SetPoint("LEFT", f.icon, "RIGHT", 8, 0)
+    f.text:SetJustifyH("LEFT")
+    f:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:AddLine("Windfall food reminder")
+        GameTooltip:AddLine("Drag to move it. /wf food switches it off.", 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    f:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    f:Hide()
+    FOOD.frame = f
+    return f
+end
+
+local function Sound()
+    local kit = _G.SOUNDKIT
+    if type(kit) == "table" and _G.PlaySound then pcall(PlaySound, kit.RAID_WARNING or kit.ALARM_CLOCK_WARNING_3 or 8959) end
+end
+
+-- What to show now: "eat", "ending" or nothing.
+function FOOD.Update()
+    if not db then return end
+    local f = FOOD.frame
+    if not db.foodRemind then
+        if f then f:Hide() end
+        FOOD.state = ""
+        return
+    end
+    Scan()
+    local now = (_G.GetTime and GetTime()) or 0
+    local left = FOOD.last and FOOD.ends > 0 and (FOOD.ends - now) or nil
+    local combat = Call("InCombatLockdown") and true or false
+    local away = Call("UnitIsDeadOrGhost", "player") or Call("UnitOnTaxi", "player")
+    local state = ""
+    if away then
+        state = ""
+    elseif FOOD.last and left and left <= WARN_AT and left > 0 then
+        state = "ending"
+    elseif not FOOD.last and not FOOD.eating and not combat and not Call("IsResting") then
+        state = "eat"
+    end
+    if state == "" then
+        if f then f:Hide() end
+        FOOD.state = ""
+        return
+    end
+    f = f or Build()
+    if state == "ending" then
+        f.text:SetText(string.format("|cffffd100Well Fed ends in %d s|r", math.ceil(left)))
+    else
+        f.text:SetText("|cffff6060No food buff: eat your buff food|r")
+    end
+    f:Show()
+    if state ~= FOOD.state then Sound() end -- once, as the note appears
+    FOOD.state = state
+end
+
+function ns.ToggleFood()
+    db.foodRemind = not db.foodRemind
+    FOOD.Update()
+    return db.foodRemind
+end
+ns.FoodRefresh = FOOD.Update
+
+local watch = CreateFrame("Frame")
+for _, event in ipairs({ "PLAYER_ENTERING_WORLD", "PLAYER_REGEN_ENABLED", "PLAYER_REGEN_DISABLED",
+    "PLAYER_UPDATE_RESTING", "PLAYER_DEAD", "PLAYER_ALIVE", "PLAYER_UNGHOST" }) do
+    pcall(watch.RegisterEvent, watch, event)
+end
+pcall(watch.RegisterUnitEvent, watch, "UNIT_AURA", "player")
+watch:SetScript("OnEvent", function() FOOD.Update() end)
+-- the countdown, and a look every second for the rest
+watch:SetScript("OnUpdate", function(_, elapsed)
+    FOOD.since = FOOD.since + (tonumber(elapsed) or 0)
+    if FOOD.since < (FOOD.state == "ending" and 0.25 or 1) then return end
+    FOOD.since = 0
+    if db and db.foodRemind then FOOD.Update() end
+end)
+end
+
 ns.dev = {
     Route = function(...) return ComputeRoute(...) end,
     TogglePanel = function() TogglePanel() end,
@@ -7296,6 +7447,14 @@ SlashCmdList["WINDFALL"] = function(msg)
     elseif msg == "fishsound" then
         db.fishSound = db.fishSound == false
         print("|cff7fd36bWindfall|r: bobber sound boost " .. (db.fishSound and "on" or "off") .. ".")
+    elseif msg == "food" or msg == "foodbuff" or msg == "wellfed" then
+        print("|cff7fd36bWindfall|r: the buff food reminder is " .. (ns.ToggleFood() and "on" or "off") .. ".")
+        RefreshSettings()
+    elseif msg:match("^food%s+name") then
+        local name = msg:match("^food%s+name%s+(.+)$")
+        db.foodBuff = name or nil
+        print("|cff7fd36bWindfall|r: the food reminder looks for Well Fed" .. (name and (" or a buff with '" .. name .. "' in its name.") or " only."))
+        if ns.FoodRefresh then ns.FoodRefresh() end
     elseif msg == "start" then
         Start() Refresh()
     elseif msg == "pause" or msg == "stop" then
@@ -7331,7 +7490,7 @@ SlashCmdList["WINDFALL"] = function(msg)
     elseif msg == "" or msg == "show" or msg == "hide" or msg == "toggle" then
         Windfall_ToggleWindow()
     else
-        print("|cff7fd36bWindfall|r: /wf (open or close), /wf prof (recipes), /wf level (levelling route), /wf money (what earns), /wf farm (gold per hour and zones), /wf settings, /wf gather, /wf loot, /wf start, /wf pause, /wf reset (save and start over), /wf discard, /wf fish (fishing key on or off), /wf fishkey (choose the key), /wf sparkle (node sparkles on or off), /wf hud (farming mode: the minimap as an overlay; /wf hud 70 sets its size, /wf hud terrain 30 shows the map's terrain faintly, /wf hud names switches node names)")
+        print("|cff7fd36bWindfall|r: /wf (open or close), /wf prof (recipes), /wf level (levelling route), /wf money (what earns), /wf farm (gold per hour and zones), /wf settings, /wf gather, /wf loot, /wf start, /wf pause, /wf reset (save and start over), /wf discard, /wf fish (fishing key on or off), /wf fishkey (choose the key), /wf sparkle (node sparkles on or off), /wf hud (farming mode: the minimap as an overlay; /wf hud 70 sets its size, /wf hud terrain 30 shows the map's terrain faintly, /wf hud names switches node names), /wf food (buff food reminder on or off; /wf food name <buff> adds a buff name to look for)")
     end
 end
 

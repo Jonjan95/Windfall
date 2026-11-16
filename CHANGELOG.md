@@ -2,6 +2,13 @@
 
 All changes to Windfall, newest first. After an update, type `/reload` in game (or restart the game when the notes say so).
 
+## [0.2.54] - 2026-11-16
+
+- **Buff food reminder.** Switch it on with *Remind me to eat buff food* in Settings, or `/wf food`. A note appears on screen while you have no Well Fed buff, and for the buff's last 30 seconds it counts down (*Well Fed ends in 25 s*), with a sound as each appears.
+  - It keeps quiet in combat, while you are eating, while resting in a city or inn, on a flight path and when dead.
+  - Drag the note to move it; it stays where you put it.
+  - If your food's buff is not called Well Fed, `/wf food name <part of the buff's name>` adds it.
+
 ## [0.2.53] - 2026-11-16
 
 - **Enchanting: the plan knows about rods.** An enchant needs one particular rod (Runed Copper, Silver, Golden, Truesilver or Arcanite Rod) in your bags, and the plan did not look at that, so it could stop at a recipe you had no rod for. Now a recipe whose rod you do not have is only planned when the rod can be made at that skill, and then making the rod comes first as its own step (*Runed Silver Rod x1*), with its materials on the shopping list. A rod you already have, in bags or bank, is never made again.
