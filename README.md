@@ -54,7 +54,7 @@ The minimap, large and see-through in the middle of the screen, so herb and ore 
 - Switch it with the map icon on the bar, the *Farming mode* button on the Farming tab, `/wf hud`, or a key binding.
 - **Hold Alt** to point at a dot and see what it is; without Alt, clicks and mouseover go through to the world.
 - GatherMate2's nodes have their name beside them (`/wf hud names` switches that off or on).
-- `/wf hud 70` sets its size in percent of the screen's height (40 to 100).
+- **Map terrain** and **Map size** sliders on the Farming tab: fade the map itself in behind the dots to find your way by (0 shows only the dots), and set how much of the screen's height it takes. Also `/wf hud terrain 30` and `/wf hud 70`.
 - The game does not let addons move the minimap in combat, so switching waits until combat ends.
 - Tracking (Find Herbs, Find Minerals) has to be on for dots to show, as on the normal minimap.
 

@@ -849,11 +849,20 @@ print(rt.eval(r'''(function()
   out[#out+1] = "hud: Alt released -> pin takes mouse="..tostring(pin.mouse).." map takes mouse="..tostring(Minimap.mouse)
   SlashCmdList.WINDFALL("hud names")
   out[#out+1] = "hud: /wf hud names -> label shown="..tostring(pin.windfallLabel:IsShown()); SlashCmdList.WINDFALL("hud names")
+  -- the terrain faded in: the skin's pieces on the map are hidden one by one
+  local border = CreateFrame("Frame"); border.alpha = 1
+  border.SetAlpha = function(self, a) self.alpha = a end; border.GetAlpha = function(self) return self.alpha end
+  Minimap.GetChildren = function() return border end
+  SlashCmdList.WINDFALL("hud terrain 30")
+  out[#out+1] = "hud: /wf hud terrain 30 -> terrain alpha="..tostring(Minimap.alpha).." skin border alpha="..tostring(border.alpha).." saved="..tostring(WindfallDB.hudTerrain)
+  Minimap.alpha = 1; WindfallFarmHud.onOnUpdate(WindfallFarmHud, 0.3)
+  out[#out+1] = "hud: a skin sets the map opaque -> back to "..tostring(Minimap.alpha)
   combat = true; Windfall_ToggleFarmHud()
   out[#out+1] = "hud: off in combat -> still in overlay="..tostring(Minimap.parent == WindfallFarmHud)
   combat = false; for _, h in ipairs(handlers) do h(nil, "PLAYER_REGEN_ENABLED") end
   Minimap:SetAlpha(0.5)
   out[#out+1] = "hud: after it is off the map answers again -> alpha="..tostring(Minimap.alpha); Minimap:SetAlpha(1)
+  out[#out+1] = "hud: off -> skin border alpha back="..tostring(border.alpha); Minimap.GetChildren = nil; SlashCmdList.WINDFALL("hud terrain 0")
   out[#out+1] = "hud: off -> pin label shown="..tostring(pin.windfallLabel:IsShown()).." pin takes mouse again="..tostring(pin.mouse)
   out[#out+1] = "hud: combat over -> overlay shown="..tostring(WindfallFarmHud:IsShown()).." map back="..tostring(Minimap.parent == UIParent).." alpha="..tostring(Minimap.alpha).." rotate="..tostring(cvars.rotateMinimap)
   GetProfessionInfo = oldGPI3; playerSurname = nil; player = "Huntie"; class = "HUNTER"; containers = {}

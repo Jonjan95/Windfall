@@ -4347,7 +4347,7 @@ end
 -- as it was when the mode is switched off. The game does not let addons
 -- move the minimap in combat, so switching waits for combat to end.
 do
-local HUD = { on = false, quiet = {}, pinMouse = {}, since = 0, scan = 0 }
+local HUD = { on = false, quiet = {}, pinMouse = {}, dim = {}, since = 0, scan = 0 }
 local SCALE = 1.4 -- the dots are drawn at the map's scale: a little larger than usual
 local ROUND_MASK = 186178 -- the game's round minimap mask
 -- What a minimap skin calls to put the map where it wants it. While the mode
@@ -4381,6 +4381,29 @@ end
 
 local function Fighting()
     return InCombatLockdown and InCombatLockdown()
+end
+
+-- How visible the map's terrain is: 0 (only the dots) to 1 (the whole map).
+function HUD.Terrain()
+    return math.max(0, math.min(100, db.hudTerrain or 0)) / 100
+end
+
+-- With the terrain showing, what a skin hangs on the minimap (borders,
+-- buttons, text) would show with it in the middle of the screen: those
+-- pieces are made invisible one by one, and put back afterwards.
+function HUD.Dim()
+    local function Each(...)
+        for i = 1, select("#", ...) do
+            local piece = select(i, ...)
+            local alpha = piece.GetAlpha and piece:GetAlpha()
+            if type(alpha) == "number" and alpha > 0 then
+                if HUD.dim[piece] == nil then HUD.dim[piece] = alpha end
+                piece:SetAlpha(0)
+            end
+        end
+    end
+    Each(Minimap:GetChildren())
+    Each(Minimap:GetRegions())
 end
 
 function HUD.Size()
@@ -4429,7 +4452,7 @@ function HUD.Place()
     pcall(Map, "SetScale", SCALE)
     pcall(Map, "SetSize", size / SCALE, size / SCALE)
     pcall(Map, "SetZoom", 0)
-    pcall(Map, "SetAlpha", 0)
+    pcall(Map, "SetAlpha", HUD.Terrain())
     HUD.Mouse()
     pcall(Map, "EnableMouseWheel", false)
     HUD.want = size / SCALE
@@ -4510,8 +4533,9 @@ function HUD.Hold(elapsed)
     if HUD.since < 0.2 then return end
     HUD.scan = HUD.scan + HUD.since
     HUD.since = 0
-    local alpha = Minimap:GetAlpha()
-    if type(alpha) == "number" and alpha > 0 then pcall(Map, "SetAlpha", 0) end
+    local alpha, terrain = Minimap:GetAlpha(), HUD.Terrain()
+    if type(alpha) == "number" and math.abs(alpha - terrain) > 0.005 then pcall(Map, "SetAlpha", terrain) end
+    if terrain > 0 then HUD.Dim() end
     HUD.Labels()
     if Fighting() then return end
     local width = Minimap:GetWidth()
@@ -4561,6 +4585,7 @@ function HUD.Enable()
     HUD.Quiet(Minimap)
     HUD.Rotate("1")
     HUD.Others(true)
+    if HUD.Terrain() > 0 then HUD.Dim() end
     HUD.Labels()
     if UpdateBarIcons then UpdateBarIcons() end
     if RefreshSettings then RefreshSettings() end
@@ -4603,6 +4628,8 @@ function HUD.Disable()
     if s.shown ~= false then pcall(Map, "Show") end
     for child in pairs(HUD.quiet) do pcall(child.EnableMouse, child, true) end
     HUD.quiet = {}
+    for piece, alpha in pairs(HUD.dim) do pcall(piece.SetAlpha, piece, alpha) end
+    HUD.dim = {}
     HUD.saved = nil
     -- a minimap skin puts its own look back: shape, size, place and opacity
     if _G._EMM_ApplyMinimap then pcall(_G._EMM_ApplyMinimap) end
@@ -4629,6 +4656,16 @@ function ns.SetHudSize(percent)
     db.hudSize = math.max(40, math.min(100, math.floor(percent + 0.5)))
     if HUD.on and not Fighting() then HUD.Place() end
     return db.hudSize
+end
+
+-- How visible the terrain is in farming mode, in percent (0: only the dots).
+function ns.SetHudTerrain(percent)
+    db.hudTerrain = math.max(0, math.min(100, math.floor(percent + 0.5)))
+    if HUD.on then
+        pcall(Map, "SetAlpha", HUD.Terrain())
+        if HUD.Terrain() > 0 then HUD.Dim() end
+    end
+    return db.hudTerrain
 end
 
 -- Names beside GatherMate2's pins on the overlay, on or off.
@@ -4794,6 +4831,37 @@ function NP.SetScroll(s, offset, maxOffset, total, room)
         s.thumb:ClearAllPoints()
         s.thumb:SetPoint("TOP", s, "TOP", 0, -(room - thumb) * offset / maxOffset)
     end
+end
+
+-- A slider with its value in its label; set(value) returns the value kept.
+function NP.Slider(parent, label, low, high, step, get, set)
+    local sl = CreateFrame("Slider", nil, parent)
+    sl:SetSize(128, 14)
+    sl:SetOrientation("HORIZONTAL")
+    sl:SetMinMaxValues(low, high)
+    sl:SetValueStep(step)
+    if sl.SetObeyStepOnDrag then sl:SetObeyStepOnDrag(true) end
+    local track = sl:CreateTexture(nil, "BACKGROUND")
+    track:SetPoint("LEFT", 0, 0)
+    track:SetPoint("RIGHT", 0, 0)
+    track:SetHeight(4)
+    track:SetColorTexture(0, 0, 0, 0.7)
+    sl:SetThumbTexture("Interface\\Buttons\\UI-SliderBar-Button-Horizontal")
+    sl.label = NP.Text(parent, "GameFontHighlightSmall")
+    sl.label:SetPoint("BOTTOMLEFT", sl, "TOPLEFT", 0, 2)
+    function sl.Say(value) sl.label:SetText(string.format("%s  |cffffd100%d%%|r", label, value)) end
+    function sl.Sync()
+        local value = get()
+        sl.syncing = true
+        sl:SetValue(value)
+        sl.syncing = false
+        sl.Say(value)
+    end
+    sl:SetScript("OnValueChanged", function(_, value)
+        if sl.syncing == true or type(value) ~= "number" then return end
+        sl.Say(set(value))
+    end)
+    return sl
 end
 
 -- A setting's checkbox: a saved key (on unless switched off), or its own get and set.
@@ -5982,6 +6050,14 @@ function NP.BuildFarming(parent)
     local head = z:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     head:SetPoint("BOTTOMLEFT", 16, y + 4)
     head:SetText("Node sparkles")
+    z.terrain = NP.Slider(z, "Map terrain", 0, 100, 5,
+        function() return db.hudTerrain or 0 end, function(value) return ns.SetHudTerrain(value) end)
+    z.terrain:SetPoint("BOTTOMRIGHT", -10, 70)
+    NP.Tooltip(z.terrain, "Map terrain", "How much of the map itself shows in farming mode. At 0 only the node dots show; higher fades the terrain in, to find your way by.")
+    z.size = NP.Slider(z, "Map size", 40, 100, 5,
+        function() return db.hudSize or 80 end, function(value) return ns.SetHudSize(value) end)
+    z.size:SetPoint("BOTTOMRIGHT", -10, 106)
+    NP.Tooltip(z.size, "Map size", "How much of the screen's height the farming mode map takes.")
     z.hud = NP.Button(z, "Farming mode", 120)
     z.hud:SetPoint("BOTTOMRIGHT", -10, 38)
     z.hud:SetScript("OnClick", function() Windfall_ToggleFarmHud() end)
@@ -6065,6 +6141,8 @@ function NP.DrawFarming()
     z.hint:SetPoint("RIGHT", -16, 0)
     z.hint:SetText(zoneHint or "")
     z.hud:SetText(ns.HudOn() and "Farming mode: on" or "Farming mode")
+    z.terrain.Sync()
+    z.size.Sync()
 end
 
 -- -------------------------------------------------------------- Fishing --
@@ -6735,12 +6813,15 @@ SlashCmdList["WINDFALL"] = function(msg)
         Windfall_ToggleFarmHud()
     elseif msg == "hud names" or msg == "hud name" then
         print("|cff7fd36bWindfall|r: names beside GatherMate2's nodes in farming mode are " .. (ns.ToggleHudNames() and "on" or "off") .. ".")
+    elseif msg:match("^hud%s+terrain%s+%d+$") or msg:match("^hud%s+alpha%s+%d+$") then
+        print("|cff7fd36bWindfall|r: farming mode shows the map's terrain at " .. ns.SetHudTerrain(tonumber(msg:match("%d+"))) .. "%.")
+        if ns.OnSettings then ns.OnSettings() end
     elseif msg:match("^hud%s+%d+$") then
         print("|cff7fd36bWindfall|r: farming mode map is " .. ns.SetHudSize(tonumber(msg:match("%d+"))) .. "% of the screen's height.")
     elseif msg == "" or msg == "show" or msg == "hide" or msg == "toggle" then
         Windfall_ToggleWindow()
     else
-        print("|cff7fd36bWindfall|r: /wf (open or close), /wf prof (recipes), /wf level (levelling route), /wf money (what earns), /wf farm (gold per hour and zones), /wf settings, /wf gather, /wf loot, /wf start, /wf pause, /wf reset (save and start over), /wf discard, /wf fish (fishing key on or off), /wf fishkey (choose the key), /wf sparkle (node sparkles on or off), /wf hud (farming mode: the minimap as an overlay; /wf hud 70 sets its size, /wf hud names switches node names)")
+        print("|cff7fd36bWindfall|r: /wf (open or close), /wf prof (recipes), /wf level (levelling route), /wf money (what earns), /wf farm (gold per hour and zones), /wf settings, /wf gather, /wf loot, /wf start, /wf pause, /wf reset (save and start over), /wf discard, /wf fish (fishing key on or off), /wf fishkey (choose the key), /wf sparkle (node sparkles on or off), /wf hud (farming mode: the minimap as an overlay; /wf hud 70 sets its size, /wf hud terrain 30 shows the map's terrain faintly, /wf hud names switches node names)")
     end
 end
 

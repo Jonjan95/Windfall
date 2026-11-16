@@ -2,6 +2,11 @@
 
 All changes to Windfall, newest first. After an update, type `/reload` in game (or restart the game when the notes say so).
 
+## [0.2.48] - 2026-11-16
+
+- **Farming mode: the map's terrain can show.** A *Map terrain* slider on the Farming tab (or `/wf hud terrain 30`) fades the map itself in behind the dots, from 0 (only the dots, as before) to 100 (the whole map), so you can find your way by roads, mountains and water. With a minimap skin, its borders, buttons and text stay hidden while the mode is on.
+- A *Map size* slider sits next to it (the same as `/wf hud 70`).
+
 ## [0.2.47] - 2026-11-16
 
 - **Farming mode: hold Alt to point at a dot.** While Alt is held the overlay takes the mouse, so pointing at a node dot shows the game's tooltip with what it is. Let go and every click and mouseover goes through to the world again. (Not in combat: the game does not let addons change the minimap then.)
