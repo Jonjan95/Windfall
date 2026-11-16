@@ -2,6 +2,10 @@
 
 All changes to Windfall, newest first. After an update, type `/reload` in game (or restart the game when the notes say so).
 
+## [0.2.49] - 2026-11-16
+
+- **Farming tab:** the farming mode button and its two sliders no longer sit on top of the node sparkle switches. Everything under the zones is one column now: node sparkles, then farming mode with *Map terrain* and *Map size*, then the button. *Clear* moved up next to the zones' title, and the zone list shows the best 6.
+
 ## [0.2.48] - 2026-11-16
 
 - **Farming mode: the map's terrain can show.** A *Map terrain* slider on the Farming tab (or `/wf hud terrain 30`) fades the map itself in behind the dots, from 0 (only the dots, as before) to 100 (the whole map), so you can find your way by roads, mountains and water. With a minimap skin, its borders, buttons and text stay hidden while the mode is on.

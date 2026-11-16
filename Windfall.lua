@@ -4716,7 +4716,7 @@ local ROW = 20
 local HEADER = 24
 local LIST_W = 296
 local SESSION_ROWS = 14
-local ZONE_ROWS = 12
+local ZONE_ROWS = 6 -- room under them for farming mode and sparkles
 local MONEY_ROWS = 19
 local FISHING_LINE = 356
 local TABS = {
@@ -6040,8 +6040,26 @@ function NP.BuildFarming(parent)
     end
     z.hint = z:CreateFontString(nil, "OVERLAY", "GameFontDisable")
     z.hint:SetJustifyH("LEFT")
-    -- node sparkles, each kind on its own
-    local y = 10
+    -- One column under the zones, from the bottom up: farming mode and its
+    -- two sliders, then the node sparkles. (The box is narrow: nothing side by side.)
+    z.hud = NP.Button(z, "Farming mode", 150)
+    z.hud:SetPoint("BOTTOMLEFT", 12, 12)
+    z.hud:SetScript("OnClick", function() Windfall_ToggleFarmHud() end)
+    NP.Tooltip(z.hud, "Farming mode", "The minimap, large and see-through in the middle of the screen, so node dots show around your character. Hold Alt to point at a dot and see what it is. Also on the bar and as a key binding.")
+    z.size = NP.Slider(z, "Map size", 40, 100, 5,
+        function() return db.hudSize or 80 end, function(value) return ns.SetHudSize(value) end)
+    z.size:SetPoint("BOTTOMLEFT", 16, 52)
+    z.size:SetPoint("RIGHT", z, "RIGHT", -16, 0)
+    NP.Tooltip(z.size, "Map size", "How much of the screen's height the farming mode map takes.")
+    z.terrain = NP.Slider(z, "Map terrain", 0, 100, 5,
+        function() return db.hudTerrain or 0 end, function(value) return ns.SetHudTerrain(value) end)
+    z.terrain:SetPoint("BOTTOMLEFT", 16, 88)
+    z.terrain:SetPoint("RIGHT", z, "RIGHT", -16, 0)
+    NP.Tooltip(z.terrain, "Map terrain", "How much of the map itself shows in farming mode. At 0 only the node dots show; higher fades the terrain in, to find your way by.")
+    local hudHead = z:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    hudHead:SetPoint("BOTTOMLEFT", 16, 120)
+    hudHead:SetText("Farming mode")
+    local y = 146
     for i = #SPARKLES, 1, -1 do
         local c = NP.SparkleCheck(z, SPARKLES[i][1], SPARKLES[i][2])
         c:SetPoint("BOTTOMLEFT", 12, y)
@@ -6050,20 +6068,8 @@ function NP.BuildFarming(parent)
     local head = z:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     head:SetPoint("BOTTOMLEFT", 16, y + 4)
     head:SetText("Node sparkles")
-    z.terrain = NP.Slider(z, "Map terrain", 0, 100, 5,
-        function() return db.hudTerrain or 0 end, function(value) return ns.SetHudTerrain(value) end)
-    z.terrain:SetPoint("BOTTOMRIGHT", -10, 70)
-    NP.Tooltip(z.terrain, "Map terrain", "How much of the map itself shows in farming mode. At 0 only the node dots show; higher fades the terrain in, to find your way by.")
-    z.size = NP.Slider(z, "Map size", 40, 100, 5,
-        function() return db.hudSize or 80 end, function(value) return ns.SetHudSize(value) end)
-    z.size:SetPoint("BOTTOMRIGHT", -10, 106)
-    NP.Tooltip(z.size, "Map size", "How much of the screen's height the farming mode map takes.")
-    z.hud = NP.Button(z, "Farming mode", 120)
-    z.hud:SetPoint("BOTTOMRIGHT", -10, 38)
-    z.hud:SetScript("OnClick", function() Windfall_ToggleFarmHud() end)
-    NP.Tooltip(z.hud, "Farming mode", "The minimap, large and see-through in the middle of the screen, so node dots show around your character. Hold Alt to point at a dot and see what it is; GatherMate2's nodes have their name beside them. Also on the bar and as a key binding; /wf hud 70 sets its size.")
-    z.clear = NP.Button(z, "Clear zones", 100)
-    z.clear:SetPoint("BOTTOMRIGHT", -10, 10)
+    z.clear = NP.Button(z, "Clear", 70)
+    z.clear:SetPoint("TOPRIGHT", -10, -12)
     z.clear:SetScript("OnClick", function()
         if StaticPopup_Show then StaticPopup_Show("WINDFALL_CLEAR_HISTORY") end
     end)
