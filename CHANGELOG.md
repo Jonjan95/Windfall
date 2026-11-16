@@ -2,6 +2,12 @@
 
 All changes to Windfall, newest first. After an update, type `/reload` in game (or restart the game when the notes say so).
 
+## [0.2.47] - 2026-11-16
+
+- **Farming mode: hold Alt to point at a dot.** While Alt is held the overlay takes the mouse, so pointing at a node dot shows the game's tooltip with what it is. Let go and every click and mouseover goes through to the world again. (Not in combat: the game does not let addons change the minimap then.)
+- **Names beside nodes.** GatherMate2's nodes on the overlay have their name written beside them, so you can tell a Dreamfoil spot from a Plaguebloom spot without pointing. `/wf hud names` switches the names off or on. The game's own live dots cannot be named (addons are not told where they are); a live dot on a named spot is that herb.
+- GatherMate2's pins on the overlay no longer take clicks, except while Alt is held (for their tooltip and menu).
+
 ## [0.2.46] - 2026-11-16
 
 - **Farming mode stays centred.** With a minimap skin (EllesmereUI), the map was pushed off to the side: the skin clamps the minimap to the screen with margins and puts it back in its own place and size. While farming mode is on, the minimap is no longer clamped and the skin's attempts to move, resize or show it do nothing; its position is also checked continuously. Switching the mode off hands the map back to the skin, which restores its own look.

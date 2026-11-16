@@ -1984,6 +1984,7 @@ function BuildBar()
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         GameTooltip:AddLine("Farming mode" .. (ns.HudOn and ns.HudOn() and "  |cff7fd36bON|r" or "  |cff999999off|r"))
         GameTooltip:AddLine("The minimap, large and see-through in the middle of the screen, so node dots show around your character.", 1, 1, 1, true)
+        GameTooltip:AddLine("Hold Alt to point at a dot and see what it is.", 1, 1, 1, true)
         GameTooltip:AddLine("Click: switch on or off", 0.6, 0.6, 0.6)
         GameTooltip:Show()
     end)
@@ -4346,7 +4347,7 @@ end
 -- as it was when the mode is switched off. The game does not let addons
 -- move the minimap in combat, so switching waits for combat to end.
 do
-local HUD = { on = false, quiet = {}, since = 0, scan = 0 }
+local HUD = { on = false, quiet = {}, pinMouse = {}, since = 0, scan = 0 }
 local SCALE = 1.4 -- the dots are drawn at the map's scale: a little larger than usual
 local ROUND_MASK = 186178 -- the game's round minimap mask
 -- What a minimap skin calls to put the map where it wants it. While the mode
@@ -4429,9 +4430,46 @@ function HUD.Place()
     pcall(Map, "SetSize", size / SCALE, size / SCALE)
     pcall(Map, "SetZoom", 0)
     pcall(Map, "SetAlpha", 0)
-    pcall(Map, "EnableMouse", false)
+    HUD.Mouse()
     pcall(Map, "EnableMouseWheel", false)
     HUD.want = size / SCALE
+end
+
+-- The map lets every click through. While Alt is held it takes the mouse's
+-- movement (never its clicks), so pointing at a dot shows the game's tooltip.
+function HUD.Mouse()
+    local hover = HUD.hover == true
+    pcall(Map, "EnableMouse", hover)
+    if hover then pcall(Map, "SetMouseClickEnabled", false) end
+end
+
+-- GatherMate2's pins on the overlay: each gets its node's name beside it, and
+-- takes the mouse (its own tooltip and menu) only while Alt is held.
+function HUD.Labels()
+    local pins = HUD.frame and HUD.frame.pins
+    if not pins then return end
+    local names = db.hudNames ~= false
+    for _, pin in ipairs({ pins:GetChildren() }) do
+        local title = rawget(pin, "title")
+        local label = rawget(pin, "windfallLabel")
+        if type(title) == "string" then
+            if not label and names then
+                label = pin:CreateFontString(nil, "OVERLAY")
+                label:SetFont(STANDARD_TEXT_FONT or "Fonts\\FRIZQT__.TTF", 8, "OUTLINE")
+                label:SetPoint("LEFT", pin, "RIGHT", 1, 0)
+                label:SetTextColor(1, 0.95, 0.6)
+                rawset(pin, "windfallLabel", label)
+            end
+            if label then
+                label:SetText(title)
+                label:SetShown(names)
+            end
+            if HUD.pinMouse[pin] == nil then HUD.pinMouse[pin] = pin:IsMouseEnabled() == true end
+            if HUD.pinMouse[pin] then pin:EnableMouse(HUD.hover == true) end
+        elseif label then
+            label:Hide()
+        end
+    end
 end
 
 -- Buttons and other pieces on the minimap come along invisibly; they must
@@ -4474,15 +4512,19 @@ function HUD.Hold(elapsed)
     HUD.since = 0
     local alpha = Minimap:GetAlpha()
     if type(alpha) == "number" and alpha > 0 then pcall(Map, "SetAlpha", 0) end
+    HUD.Labels()
     if Fighting() then return end
     local width = Minimap:GetWidth()
     local point, relative, _, x, y = Minimap:GetPoint(1)
     local moved = type(point) == "string" and (point ~= "CENTER" or relative ~= HUD.frame
         or math.abs(x or 0) > 0.5 or math.abs(y or 0) > 0.5 or Minimap:GetNumPoints() ~= 1)
     if moved or Minimap:GetParent() ~= HUD.frame or (type(width) == "number" and HUD.want and math.abs(width - HUD.want) > 1)
-        or Minimap:IsMouseEnabled() == true or Minimap:IsClampedToScreen() == true then
+        or Minimap:IsClampedToScreen() == true then
         HUD.Place()
     end
+    local motion
+    if Minimap.IsMouseMotionEnabled then motion = Minimap:IsMouseMotionEnabled() else motion = Minimap:IsMouseEnabled() end
+    if (motion == true) ~= (HUD.hover == true) then HUD.Mouse() end
     if HUD.scan >= 2 then
         HUD.scan = 0
         HUD.Quiet(Minimap)
@@ -4508,6 +4550,7 @@ function HUD.Enable()
     for i = 1, Minimap:GetNumPoints() or 0 do s.points[i] = { Minimap:GetPoint(i) } end
     HUD.saved = s
     HUD.on, HUD.wanted = true, nil
+    HUD.hover = IsAltKeyDown and IsAltKeyDown() and true or false
     pcall(Map, "Hide")
     HUD.Hijack(true)
     -- Round, whatever shape a skin gave the map (the skin puts its own back after).
@@ -4518,6 +4561,7 @@ function HUD.Enable()
     HUD.Quiet(Minimap)
     HUD.Rotate("1")
     HUD.Others(true)
+    HUD.Labels()
     if UpdateBarIcons then UpdateBarIcons() end
     if RefreshSettings then RefreshSettings() end
 end
@@ -4533,6 +4577,13 @@ function HUD.Disable()
     HUD.on, HUD.leaving = false, nil
     HUD.frame:Hide()
     HUD.Hijack(false)
+    HUD.hover = false
+    for pin, mouse in pairs(HUD.pinMouse) do
+        local label = rawget(pin, "windfallLabel")
+        if label then label:Hide() end
+        if mouse then pin:EnableMouse(true) end
+    end
+    HUD.pinMouse = {}
     if s.rotate then HUD.Rotate(s.rotate) end
     HUD.Others(false)
     pcall(Map, "Hide")
@@ -4580,6 +4631,13 @@ function ns.SetHudSize(percent)
     return db.hudSize
 end
 
+-- Names beside GatherMate2's pins on the overlay, on or off.
+function ns.ToggleHudNames()
+    db.hudNames = db.hudNames == false
+    if HUD.on then HUD.Labels() end
+    return db.hudNames
+end
+
 function ns.HudOn()
     return HUD.on and not HUD.leaving or HUD.wanted == true
 end
@@ -4587,8 +4645,16 @@ end
 local watcher = CreateFrame("Frame")
 watcher:RegisterEvent("PLAYER_REGEN_ENABLED")
 watcher:RegisterEvent("PLAYER_LOGOUT")
-watcher:SetScript("OnEvent", function(_, event)
-    if event == "PLAYER_REGEN_ENABLED" then
+watcher:RegisterEvent("MODIFIER_STATE_CHANGED")
+watcher:SetScript("OnEvent", function(_, event, key, down)
+    if event == "MODIFIER_STATE_CHANGED" then
+        -- Alt held: the overlay can be pointed at.
+        if HUD.on and type(key) == "string" and key:find("ALT") then
+            HUD.hover = down == 1
+            if not Fighting() then HUD.Mouse() end
+            HUD.Labels()
+        end
+    elseif event == "PLAYER_REGEN_ENABLED" then
         if HUD.leaving then HUD.Disable() elseif HUD.wanted then HUD.Enable() end
     elseif HUD.on and HUD.saved and HUD.saved.rotate then
         HUD.Rotate(HUD.saved.rotate) -- the rotation setting is saved by the game: leave it as it was
@@ -5919,7 +5985,7 @@ function NP.BuildFarming(parent)
     z.hud = NP.Button(z, "Farming mode", 120)
     z.hud:SetPoint("BOTTOMRIGHT", -10, 38)
     z.hud:SetScript("OnClick", function() Windfall_ToggleFarmHud() end)
-    NP.Tooltip(z.hud, "Farming mode", "The minimap, large and see-through in the middle of the screen, so node dots show around your character. Also on the bar and as a key binding; /wf hud 70 sets its size.")
+    NP.Tooltip(z.hud, "Farming mode", "The minimap, large and see-through in the middle of the screen, so node dots show around your character. Hold Alt to point at a dot and see what it is; GatherMate2's nodes have their name beside them. Also on the bar and as a key binding; /wf hud 70 sets its size.")
     z.clear = NP.Button(z, "Clear zones", 100)
     z.clear:SetPoint("BOTTOMRIGHT", -10, 10)
     z.clear:SetScript("OnClick", function()
@@ -6667,12 +6733,14 @@ SlashCmdList["WINDFALL"] = function(msg)
         Windfall_ToggleSparkles()
     elseif msg == "hud" or msg == "map" or msg == "farmhud" then
         Windfall_ToggleFarmHud()
+    elseif msg == "hud names" or msg == "hud name" then
+        print("|cff7fd36bWindfall|r: names beside GatherMate2's nodes in farming mode are " .. (ns.ToggleHudNames() and "on" or "off") .. ".")
     elseif msg:match("^hud%s+%d+$") then
         print("|cff7fd36bWindfall|r: farming mode map is " .. ns.SetHudSize(tonumber(msg:match("%d+"))) .. "% of the screen's height.")
     elseif msg == "" or msg == "show" or msg == "hide" or msg == "toggle" then
         Windfall_ToggleWindow()
     else
-        print("|cff7fd36bWindfall|r: /wf (open or close), /wf prof (recipes), /wf level (levelling route), /wf money (what earns), /wf farm (gold per hour and zones), /wf settings, /wf gather, /wf loot, /wf start, /wf pause, /wf reset (save and start over), /wf discard, /wf fish (fishing key on or off), /wf fishkey (choose the key), /wf sparkle (node sparkles on or off), /wf hud (farming mode: the minimap as an overlay; /wf hud 70 sets its size)")
+        print("|cff7fd36bWindfall|r: /wf (open or close), /wf prof (recipes), /wf level (levelling route), /wf money (what earns), /wf farm (gold per hour and zones), /wf settings, /wf gather, /wf loot, /wf start, /wf pause, /wf reset (save and start over), /wf discard, /wf fish (fishing key on or off), /wf fishkey (choose the key), /wf sparkle (node sparkles on or off), /wf hud (farming mode: the minimap as an overlay; /wf hud 70 sets its size, /wf hud names switches node names)")
     end
 end
 
