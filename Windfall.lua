@@ -4348,13 +4348,34 @@ end
 do
 local HUD = { on = false, quiet = {}, since = 0, scan = 0 }
 local SCALE = 1.4 -- the dots are drawn at the map's scale: a little larger than usual
+local ROUND_MASK = 186178 -- the game's round minimap mask
+-- What a minimap skin calls to put the map where it wants it. While the mode
+-- is on these do nothing when called on the Minimap, so the map stays put.
+local HELD = { "SetPoint", "ClearAllPoints", "SetAllPoints", "SetParent", "SetSize", "SetWidth", "SetHeight", "SetScale",
+    "SetAlpha", "SetZoom", "SetFrameStrata", "SetFrameLevel", "EnableMouse", "EnableMouseWheel",
+    "SetClampedToScreen", "SetClampRectInsets", "SetMaskTexture" }
 
--- The minimap's own method, past anything an addon put on the Minimap table
--- (skins hook SetPoint and SetParent to keep the map where they want it).
+-- The minimap's own method, past anything put on the Minimap table (the
+-- do-nothings above, or a skin's hooks).
 local function Map(method, ...)
     local index = getmetatable(Minimap).__index
-    local fn = type(index) == "table" and index[method] or Minimap[method]
+    local fn = type(index) == "table" and index[method] or (HUD.held and HUD.held[method]) or Minimap[method]
     return fn(Minimap, ...)
+end
+
+local function Nothing() end
+
+function HUD.Hijack(on)
+    if on then
+        HUD.held = {}
+        for _, name in ipairs(HELD) do
+            HUD.held[name] = rawget(Minimap, name) or false
+            rawset(Minimap, name, Nothing)
+        end
+    elseif HUD.held then
+        for _, name in ipairs(HELD) do rawset(Minimap, name, HUD.held[name] or nil) end
+        HUD.held = nil
+    end
 end
 
 local function Fighting()
@@ -4396,6 +4417,9 @@ function HUD.Place()
     f:SetSize(size, size)
     f.pins:SetScale(SCALE)
     f.pins:SetSize(size / SCALE, size / SCALE)
+    -- a map clamped to the screen with margins (as skins set it) cannot sit in the middle at this size
+    pcall(Map, "SetClampedToScreen", false)
+    pcall(Map, "SetClampRectInsets", 0, 0, 0, 0)
     pcall(Map, "SetParent", f)
     pcall(Map, "ClearAllPoints")
     pcall(Map, "SetPoint", "CENTER", f, "CENTER", 0, 0)
@@ -4452,8 +4476,11 @@ function HUD.Hold(elapsed)
     if type(alpha) == "number" and alpha > 0 then pcall(Map, "SetAlpha", 0) end
     if Fighting() then return end
     local width = Minimap:GetWidth()
-    if Minimap:GetParent() ~= HUD.frame or (type(width) == "number" and HUD.want and math.abs(width - HUD.want) > 1)
-        or Minimap:IsMouseEnabled() == true then
+    local point, relative, _, x, y = Minimap:GetPoint(1)
+    local moved = type(point) == "string" and (point ~= "CENTER" or relative ~= HUD.frame
+        or math.abs(x or 0) > 0.5 or math.abs(y or 0) > 0.5 or Minimap:GetNumPoints() ~= 1)
+    if moved or Minimap:GetParent() ~= HUD.frame or (type(width) == "number" and HUD.want and math.abs(width - HUD.want) > 1)
+        or Minimap:IsMouseEnabled() == true or Minimap:IsClampedToScreen() == true then
         HUD.Place()
     end
     if HUD.scan >= 2 then
@@ -4476,10 +4503,15 @@ function HUD.Enable()
         alpha = Minimap:GetAlpha(), zoom = Minimap:GetZoom(), shown = Minimap:IsShown(),
         rotate = C_CVar and C_CVar.GetCVar and C_CVar.GetCVar("rotateMinimap") }
     s.width, s.height = Minimap:GetSize()
+    s.clamped = Minimap:IsClampedToScreen()
+    s.insets = { Minimap:GetClampRectInsets() }
     for i = 1, Minimap:GetNumPoints() or 0 do s.points[i] = { Minimap:GetPoint(i) } end
     HUD.saved = s
     HUD.on, HUD.wanted = true, nil
     pcall(Map, "Hide")
+    HUD.Hijack(true)
+    -- Round, whatever shape a skin gave the map (the skin puts its own back after).
+    if _G._EMM_ApplyMinimap then pcall(Map, "SetMaskTexture", ROUND_MASK) end
     HUD.Place()
     f:Show()
     pcall(Map, "Show")
@@ -4500,6 +4532,7 @@ function HUD.Disable()
     local s = HUD.saved or {}
     HUD.on, HUD.leaving = false, nil
     HUD.frame:Hide()
+    HUD.Hijack(false)
     if s.rotate then HUD.Rotate(s.rotate) end
     HUD.Others(false)
     pcall(Map, "Hide")
@@ -4514,11 +4547,14 @@ function HUD.Disable()
     pcall(Map, "EnableMouse", s.mouse ~= false)
     pcall(Map, "EnableMouseWheel", s.wheel ~= false)
     pcall(Map, "SetAlpha", type(s.alpha) == "number" and s.alpha or 1)
+    if type(s.insets) == "table" and #s.insets == 4 then pcall(Map, "SetClampRectInsets", unpack(s.insets)) end
+    pcall(Map, "SetClampedToScreen", s.clamped == true)
     if s.shown ~= false then pcall(Map, "Show") end
     for child in pairs(HUD.quiet) do pcall(child.EnableMouse, child, true) end
     HUD.quiet = {}
     HUD.saved = nil
-    -- a minimap skin puts its own look back
+    -- a minimap skin puts its own look back: shape, size, place and opacity
+    if _G._EMM_ApplyMinimap then pcall(_G._EMM_ApplyMinimap) end
     if _G._EMM_ApplyMapAlpha then pcall(_G._EMM_ApplyMapAlpha) end
     if UpdateBarIcons then UpdateBarIcons() end
     if RefreshSettings then RefreshSettings() end

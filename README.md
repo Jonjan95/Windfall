@@ -47,6 +47,15 @@ Switched on from the bar, the gear or the Farming tab, the nearest herb, ore vei
 
 When Windfall is done with the interact key (the line comes in, or sparkles are switched off), it puts it back to the game's defaults: 10 yards, in front of you. The rest of the time it leaves the interact settings alone, so other addons can set them as they like.
 
+## Farming mode
+
+The minimap, large and see-through in the middle of the screen, so herb and ore dots show around your character instead of up in the corner. The terrain is invisible, the map turns with you and lets every click through, and GatherMate2's remembered nodes move onto it. Switching it off puts the minimap back as it was.
+
+- Switch it with the map icon on the bar, the *Farming mode* button on the Farming tab, `/wf hud`, or a key binding.
+- `/wf hud 70` sets its size in percent of the screen's height (40 to 100).
+- The game does not let addons move the minimap in combat, so switching waits until combat ends.
+- Tracking (Find Herbs, Find Minerals) has to be on for dots to show, as on the normal minimap.
+
 ## Fishing key
 
 - **One key:** while on, a press casts Fishing and the next press reels in the bobber. Off, the key does whatever it normally does. Keyboard keys, mouse buttons and the wheel all work.
@@ -69,6 +78,7 @@ Every option is a checkbox on the **Fishing** tab.
 | `/wf fish` | Fishing key on or off |
 | `/wf fishkey` | Choose the fishing key |
 | `/wf sparkle` | Node sparkles on or off |
+| `/wf hud` | Farming mode on or off (`/wf hud 70` sets its size) |
 
 Key bindings for the fishing switch, node sparkles and the window are under Options > Keybindings > AddOns > Windfall.
 

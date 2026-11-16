@@ -2,6 +2,11 @@
 
 All changes to Windfall, newest first. After an update, type `/reload` in game (or restart the game when the notes say so).
 
+## [0.2.46] - 2026-11-16
+
+- **Farming mode stays centred.** With a minimap skin (EllesmereUI), the map was pushed off to the side: the skin clamps the minimap to the screen with margins and puts it back in its own place and size. While farming mode is on, the minimap is no longer clamped and the skin's attempts to move, resize or show it do nothing; its position is also checked continuously. Switching the mode off hands the map back to the skin, which restores its own look.
+- **Round overlay** with a minimap skin that uses a square map: the dots show in a circle around you while the mode is on, and the square map comes back afterwards.
+
 ## [0.2.45] - 2026-11-16
 
 - **Farming mode:** the minimap, large and see-through in the middle of the screen, so herb and ore dots show around your character instead of up in the corner. The terrain is invisible, the map turns with you and lets every click through, and GatherMate2's remembered nodes move onto it. Switching it off puts the minimap back exactly as it was.

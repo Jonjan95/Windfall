@@ -833,9 +833,14 @@ print(rt.eval(r'''(function()
   Minimap.alpha = 1; Minimap.parent = UIParent; cvars.rotateMinimap = "0"
   Windfall_ToggleFarmHud()
   out[#out+1] = "hud: on -> overlay shown="..tostring(WindfallFarmHud:IsShown()).." map in overlay="..tostring(Minimap.parent == WindfallFarmHud).." terrain alpha="..tostring(Minimap.alpha).." rotate="..tostring(cvars.rotateMinimap).." bar icon lit="..tostring(not WindfallBar.hud.icon.desat)
+  -- a minimap skin trying to move the map while the mode is on gets nowhere
+  Minimap:SetParent(UIParent); Minimap:SetAlpha(1)
+  out[#out+1] = "hud: a skin moves the map -> still in overlay="..tostring(Minimap.parent == WindfallFarmHud).." terrain alpha="..tostring(Minimap.alpha)
   combat = true; Windfall_ToggleFarmHud()
   out[#out+1] = "hud: off in combat -> still in overlay="..tostring(Minimap.parent == WindfallFarmHud)
   combat = false; for _, h in ipairs(handlers) do h(nil, "PLAYER_REGEN_ENABLED") end
+  Minimap:SetAlpha(0.5)
+  out[#out+1] = "hud: after it is off the map answers again -> alpha="..tostring(Minimap.alpha); Minimap:SetAlpha(1)
   out[#out+1] = "hud: combat over -> overlay shown="..tostring(WindfallFarmHud:IsShown()).." map back="..tostring(Minimap.parent == UIParent).." alpha="..tostring(Minimap.alpha).." rotate="..tostring(cvars.rotateMinimap)
   GetProfessionInfo = oldGPI3; playerSurname = nil; player = "Huntie"; class = "HUNTER"; containers = {}
   return table.concat(out, "\n")
