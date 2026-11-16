@@ -2098,6 +2098,22 @@ local SETTINGS = {
         tip = "A note on screen while you have no Well Fed buff, and a countdown for its last 30 seconds. Quiet in combat, while eating and while resting in a city or inn. Drag the note to move it.",
         get = function() return db.foodRemind end,
         set = function(value) db.foodRemind = value and true or false if ns.FoodRefresh then ns.FoodRefresh() end end },
+    { key = "foodOutCombat", label = "    Out of combat", after = function() ns.FoodRefresh() end,
+        tip = "Show the reminder while you are not fighting." },
+    { label = "    In combat", tip = "Show the reminder while you are fighting. With Out of combat unticked it shows in combat only.",
+        get = function() return db.foodCombat end,
+        set = function(value) db.foodCombat = value and true or false ns.FoodRefresh() end },
+    { label = "    In cities and inns", tip = "Show the reminder while you are resting too.",
+        get = function() return db.foodCity end,
+        set = function(value) db.foodCity = value and true or false ns.FoodRefresh() end },
+    { label = "    Only below the level cap", tip = "No reminder on a character that can no longer gain experience.",
+        get = function() return db.foodLevelling end,
+        set = function(value) db.foodLevelling = value and true or false ns.FoodRefresh() end },
+    { key = "foodWarn", label = "    Countdown before the buff ends", after = function() ns.FoodRefresh() end,
+        tip = "A countdown for the buff's last 30 seconds. /wf food warn 60 changes how early it starts (10 to 300 seconds)." },
+    { key = "foodSound", label = "    Sound", tip = "A sound as the reminder or the countdown appears." },
+    { key = "foodLock", label = "    Unlocked: drag to move", after = function() ns.FoodRefresh() end,
+        tip = "Unticked, the reminder is locked in place and clicks go through it." },
     { header = "Window" },
     { label = "Show the Windfall bar",
         tip = "The small bar with your gold per hour and the fishing and sparkle switches.",
@@ -6737,12 +6753,15 @@ function NP.BuildGear(h)
         menu:SetBackdropColor(0.05, 0.05, 0.07, 0.97)
     end
     local y = -10
-    for _, label in ipairs({ "Sparkle on the nearest gathering node", "interactDefault", "Show the Windfall bar" }) do
+    for _, label in ipairs({ "Sparkle on the nearest gathering node", "interactDefault", "Show the Windfall bar",
+        "Remind me to eat buff food", "foodOutCombat", "    In combat", "    In cities and inns",
+        "    Only below the level cap", "foodWarn", "foodSound", "foodLock" }) do
         local row = NP.Setting(label)
         if row then
             local c = NP.Check(menu, row)
             c:SetPoint("TOPLEFT", 10, y)
-            y = y - 30
+            local sub = label:find("food", 1, true) == 1 or label:find("    ", 1, true) == 1
+            y = y - (sub and 24 or 30)
         end
     end
     menu:SetHeight(-y + 8)
@@ -7342,6 +7361,7 @@ local function Build()
 end
 
 local function Sound()
+    if db.foodSound == false then return end
     local kit = _G.SOUNDKIT
     if type(kit) == "table" and _G.PlaySound then pcall(PlaySound, kit.RAID_WARNING or kit.ALARM_CLOCK_WARNING_3 or 8959) end
 end
@@ -7360,12 +7380,22 @@ function FOOD.Update()
     local left = FOOD.last and FOOD.ends > 0 and (FOOD.ends - now) or nil
     local combat = Call("InCombatLockdown") and true or false
     local away = Call("UnitIsDeadOrGhost", "player") or Call("UnitOnTaxi", "player")
+    -- the settings: in combat, out of combat, in cities, only below the cap
+    local wanted
+    if combat then wanted = db.foodCombat == true else wanted = db.foodOutCombat ~= false end
+    if wanted and not db.foodCity and Call("IsResting") then wanted = false end
+    if wanted and db.foodLevelling then
+        local cap = Call("GetMaxLevelForPlayerExpansion") or Call("GetMaxPlayerLevel")
+        local level = Call("UnitLevel", "player")
+        if type(cap) == "number" and type(level) == "number" and level >= cap then wanted = false end
+    end
+    local warnAt = tonumber(db.foodWarnAt) or WARN_AT
     local state = ""
-    if away then
+    if away or not wanted then
         state = ""
-    elseif FOOD.last and left and left <= WARN_AT and left > 0 then
+    elseif FOOD.last and left and db.foodWarn ~= false and left <= warnAt and left > 0 then
         state = "ending"
-    elseif not FOOD.last and not FOOD.eating and not combat and not Call("IsResting") then
+    elseif not FOOD.last and not FOOD.eating then
         state = "eat"
     end
     if state == "" then
@@ -7379,6 +7409,7 @@ function FOOD.Update()
     else
         f.text:SetText("|cffff6060No food buff: eat your buff food|r")
     end
+    f:EnableMouse(db.foodLock ~= false) -- locked: clicks go through
     f:Show()
     if state ~= FOOD.state then Sound() end -- once, as the note appears
     FOOD.state = state
@@ -7450,6 +7481,12 @@ SlashCmdList["WINDFALL"] = function(msg)
     elseif msg == "food" or msg == "foodbuff" or msg == "wellfed" then
         print("|cff7fd36bWindfall|r: the buff food reminder is " .. (ns.ToggleFood() and "on" or "off") .. ".")
         RefreshSettings()
+    elseif msg:match("^food%s+warn%s+%d+$") then
+        db.foodWarnAt = math.max(10, math.min(300, tonumber(msg:match("%d+"))))
+        db.foodWarn = true
+        print("|cff7fd36bWindfall|r: the food countdown starts " .. db.foodWarnAt .. " seconds before the buff ends.")
+        if ns.FoodRefresh then ns.FoodRefresh() end
+        RefreshSettings()
     elseif msg:match("^food%s+name") then
         local name = msg:match("^food%s+name%s+(.+)$")
         db.foodBuff = name or nil
@@ -7490,7 +7527,7 @@ SlashCmdList["WINDFALL"] = function(msg)
     elseif msg == "" or msg == "show" or msg == "hide" or msg == "toggle" then
         Windfall_ToggleWindow()
     else
-        print("|cff7fd36bWindfall|r: /wf (open or close), /wf prof (recipes), /wf level (levelling route), /wf money (what earns), /wf farm (gold per hour and zones), /wf settings, /wf gather, /wf loot, /wf start, /wf pause, /wf reset (save and start over), /wf discard, /wf fish (fishing key on or off), /wf fishkey (choose the key), /wf sparkle (node sparkles on or off), /wf hud (farming mode: the minimap as an overlay; /wf hud 70 sets its size, /wf hud terrain 30 shows the map's terrain faintly, /wf hud names switches node names), /wf food (buff food reminder on or off; /wf food name <buff> adds a buff name to look for)")
+        print("|cff7fd36bWindfall|r: /wf (open or close), /wf prof (recipes), /wf level (levelling route), /wf money (what earns), /wf farm (gold per hour and zones), /wf settings, /wf gather, /wf loot, /wf start, /wf pause, /wf reset (save and start over), /wf discard, /wf fish (fishing key on or off), /wf fishkey (choose the key), /wf sparkle (node sparkles on or off), /wf hud (farming mode: the minimap as an overlay; /wf hud 70 sets its size, /wf hud terrain 30 shows the map's terrain faintly, /wf hud names switches node names), /wf food (buff food reminder on or off; /wf food warn 60 sets how early the countdown starts, /wf food name <buff> adds a buff name to look for)")
     end
 end
 

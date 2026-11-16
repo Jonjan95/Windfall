@@ -953,6 +953,14 @@ print(rt.eval(r'''(function()
     auras[1].expirationTime = now + 25; WF_NS.FoodRefresh(); food("25 s left")
     combat = true; auras[1] = nil; WF_NS.FoodRefresh(); food("buff gone in combat")
     combat = false; WF_NS.FoodRefresh(); food("combat over")
+    -- its settings
+    WindfallDB.foodCombat = true; WindfallDB.foodOutCombat = false; WF_NS.FoodRefresh(); food("in combat only, out of combat")
+    combat = true; WF_NS.FoodRefresh(); food("in combat only, in combat")
+    combat = false; WindfallDB.foodCombat = false; WindfallDB.foodOutCombat = true
+    auras[1] = { name = "Well Fed", expirationTime = now + 50 }; WF_NS.FoodRefresh(); food("50 s left")
+    SlashCmdList.WINDFALL("food warn 60"); food("/wf food warn 60")
+    WindfallDB.foodWarn = false; WF_NS.FoodRefresh(); food("countdown off")
+    WindfallDB.foodWarn = nil; WindfallDB.foodWarnAt = nil; auras[1] = nil
     SlashCmdList.WINDFALL("food"); food("switched off")
     combat = wasCombat; C_UnitAuras = nil
   end

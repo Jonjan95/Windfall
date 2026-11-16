@@ -2,6 +2,16 @@
 
 All changes to Windfall, newest first. After an update, type `/reload` in game (or restart the game when the notes say so).
 
+## [0.2.55] - 2026-11-16
+
+- **Buff food reminder: settings.** Under *Remind me to eat buff food* in Settings:
+  - *Out of combat* and *In combat*: when it shows. Tick only *In combat* to see it in fights only.
+  - *In cities and inns*: show it while resting too.
+  - *Only below the level cap*: nothing on characters that no longer gain experience.
+  - *Countdown before the buff ends*: the countdown on or off; `/wf food warn 60` sets how early it starts (10 to 300 seconds, 30 as before).
+  - *Sound*: the sound as it appears.
+  - *Unlocked: drag to move*: untick to lock it in place, and clicks go through it.
+
 ## [0.2.54] - 2026-11-16
 
 - **Buff food reminder.** Switch it on with *Remind me to eat buff food* in Settings, or `/wf food`. A note appears on screen while you have no Well Fed buff, and for the buff's last 30 seconds it counts down (*Well Fed ends in 25 s*), with a sound as each appears.
