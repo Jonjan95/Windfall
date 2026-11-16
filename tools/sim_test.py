@@ -743,14 +743,31 @@ print(rt.eval(r'''(function()
   out[#out+1] = "page: search 'elixir' -> "..rows()
   NP.search.text = ""; NP.search.onOnTextChanged(NP.search)
   go("levelling")
-  out[#out+1] = "page: Levelling -> tabs: "..tabs().." | "..rows().." | search shown="..tostring(NP.search:IsShown()).." plan="..tostring(NP.plan:IsShown()).." shopping list="..tostring(NP.shop:IsShown())
+  out[#out+1] = "page: Levelling -> tabs: "..tabs().." | "..rows().." | search shown="..tostring(NP.search:IsShown()).." goal picker="..tostring(NP.goal:IsShown()).." shopping list="..tostring(NP.shop:IsShown())
+  local function goals() local t = {} for _, b in ipairs(NP.goal.buttons) do if b:IsShown() then t[#t+1] = (tostring(b.text):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""))..(b.picked and "*" or "") end end return table.concat(t, " ") end
   -- a profession that can still level: the route, and planning further
   NP.header.char.onOnClick(NP.header.char); pickMenu("Huntie-Realm", "Leatherworking")
   out[#out+1] = "page: Huntie's Leatherworking route -> "..rows()
-  out[#out+1] = "      plan button: "..tostring(NP.plan:IsShown() and NP.plan.text).." | shopping list="..tostring(NP.shop:IsShown())
-  NP.plan.onOnClick(NP.plan)
+  out[#out+1] = "      level to: "..goals().." | new plan="..tostring(NP.goal.again:IsShown()).." | shopping list="..tostring(NP.shop:IsShown())
+  NP.goal.buttons[2].onOnClick(NP.goal.buttons[2])
+  local before = rows()
+  NP.goal.buttons[3].onOnClick(NP.goal.buttons[3])
   local first = NP.headerPool[1]
-  out[#out+1] = "      plan clicked -> "..tostring(first.label.text).." | button now: "..tostring(NP.plan:IsShown() and NP.plan.text)
+  out[#out+1] = "      225 clicked -> "..tostring(first.label.text).." | level to: "..goals()
+  NP.goal.buttons[2].onOnClick(NP.goal.buttons[2])
+  out[#out+1] = "      150 clicked -> same route as before="..tostring(rows() == before).." | level to: "..goals()
+  -- the plan holds: prices move and materials arrive, the route stays
+  do
+    local api = Auctionator.API.v1; local old = api.GetAuctionPriceByItemID
+    api.GetAuctionPriceByItemID = function(c, id) local v = old(c, id) return v and (id == 2318 and v * 50 or v) end
+    NP.Refresh()
+    out[#out+1] = "      light leather 50x dearer -> same route="..tostring(rows() == before)
+    NP.goal.again.onOnClick(NP.goal.again)
+    out[#out+1] = "      New plan -> same route="..tostring(rows() == before).." | "..rows()
+    api.GetAuctionPriceByItemID = old
+    NP.goal.again.onOnClick(NP.goal.again)
+    out[#out+1] = "      prices back, New plan -> same route="..tostring(rows() == before)
+  end
   go("recipes")
   -- Make money: every character's recipes by profit
   local zg = WindfallDB.chars["Zivv Gg-Realm"]
@@ -768,7 +785,7 @@ print(rt.eval(r'''(function()
   pickMenu("Zivv Gg-Realm", "Herbalism")
   out[#out+1] = "guide: Herbalism on Recipes -> icons=["..icons().."] bar="..tostring(NP.header.bar.text.text).." | "..rows()
   go("levelling")
-  out[#out+1] = "guide: Herbalism on Levelling (137 of 150) -> plan="..tostring(NP.plan:IsShown()).." shopping list="..tostring(NP.shop:IsShown())
+  out[#out+1] = "guide: Herbalism on Levelling (137 of 150) -> goal picker="..tostring(NP.goal:IsShown()).." shopping list="..tostring(NP.shop:IsShown())
   for _, b in ipairs(NP.headerPool) do if b:IsShown() then out[#out+1] = "      ["..tostring(b.label.text).."]" end end
   for _, b in ipairs(NP.rowPool) do if b:IsShown() then out[#out+1] = "      "..tostring(b.text.text) end end
   out[#out+1] = "      picked by itself: "..guide()
@@ -793,7 +810,7 @@ print(rt.eval(r'''(function()
     [3277] = { name = "Wool Bandage", item = 3530, qty = 1, reagents = { { 2318, 1 } }, diff = "optimal" },
     [3278] = { name = "Heavy Wool Bandage", item = 3531, qty = 1, reagents = { { 2318, 2 } }, diff = "optimal" } } }
   NP.header.char.onOnClick(NP.header.char); pickMenu("Huntie-Realm", "First Aid")
-  NP.plan.onOnClick(NP.plan)
+  NP.goal.buttons[3].onOnClick(NP.goal.buttons[3])
   out[#out+1] = "guide: First Aid 120, planned to 225 -> "..rows()
   hc.professions["First Aid"] = nil; zg.gathering.Herbalism = nil; zg.gathering.Skinning = nil; zg.gathering.Mining = nil
   NP.header.char.onOnClick(NP.header.char); pickMenu("Zivv Gg-Realm", "Alchemy")

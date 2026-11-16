@@ -3056,14 +3056,14 @@ local function BuildProfessionsFrame()
     f.route:SetScript("OnClick", function(_, button)
         local _, prof = CurrentProfession()
         if not prof then return end
-        local target = profView.target or RouteTarget(prof.skill or 1)
+        local target = PB.Goal(profView.char, prof)
         if button == "RightButton" then
             -- Next target above your skill, round again after 300.
             local nextTarget
             for _, t in ipairs(ROUTE_TARGETS) do
                 if t > target and t > (prof.skill or 1) then nextTarget = t break end
             end
-            profView.target = nextTarget or RouteTarget(prof.skill or 1)
+            PB.SetGoal(profView.char, prof, nextTarget or RouteTarget(prof.skill or 1))
             RefreshProfessions()
         else
             ShowRoute(prof, profView.prof, target, profView.char)
@@ -3166,8 +3166,7 @@ function RefreshProfessions()
     f.load:SetText(pending and ("Load " .. pending.name) or "")
     f.load:SetShown(pending ~= nil)
     f.hint:SetWidth(PROF_WIDTH - (pending and 180 or 30))
-    if profView.target and profView.target <= (prof.skill or 1) then profView.target = nil end
-    f.route:SetText("Route to " .. (profView.target or RouteTarget(prof.skill or 1)))
+    f.route:SetText("Route to " .. PB.Goal(profView.char, prof))
     f.route:Hide()
     f.charButton:SetText(ClassColored(char, profView.char))
     f.profButton:SetText(profView.prof)
@@ -3513,7 +3512,8 @@ do
 -- Levelling route: the plan played forward from your skill to a target, one
 -- skill point at a time, always taking the cheapest recipe per point. Recipe
 -- colours along the way are guessed from each recipe's unlock skill, so the
--- craft counts are an estimate; the plan itself recalculates as you level.
+-- craft counts are an estimate. The recipes picked are saved (PlanOf below),
+-- so the plan holds still while you level and shop.
 local RANK_AT = { { 50, "Journeyman", 150 }, { 125, "Expert", 225 }, { 200, "Artisan", 300 } }
 ROUTE_TARGETS = { 75, 150, 225, 300 }
 
@@ -3524,8 +3524,109 @@ function RouteTarget(skill)
     return 300
 end
 
+-- The plan of a character's profession, saved: the goal picked, and which
+-- recipe each skill point is made with. Once worked out the plan stays as it
+-- is, so the shopping list only ever counts down. It is worked out again only
+-- for points it has no recipe for (a further goal, or a recipe that turned
+-- grey sooner than expected), or when you ask for a new plan.
+local function PlanOf(charKey, prof, create)
+    if not (charKey and prof and db) then return nil end
+    local key = charKey .. "|" .. tostring(prof.line or "?")
+    db.plans = db.plans or {}
+    if not db.plans[key] and create then db.plans[key] = { at = {} } end
+    return db.plans[key]
+end
+
+-- How far the plan goes: the goal picked, or the next skill cap.
+function PB.Goal(charKey, prof)
+    local skill = prof.skill or 1
+    local plan = PlanOf(charKey, prof)
+    if plan and plan.goal and plan.goal > skill then return plan.goal end
+    return RouteTarget(skill)
+end
+
+function PB.SetGoal(charKey, prof, goal)
+    local plan = PlanOf(charKey, prof, true)
+    if plan then plan.goal = goal end
+end
+
+-- Forget the recipes picked: the next look at the route plans it afresh.
+function PB.NewPlan(charKey, prof)
+    local plan = PlanOf(charKey, prof)
+    if plan then plan.at = {} end
+end
+
+-- "Level to" with a button per skill cap still ahead (the goal picked is lit)
+-- and New plan. The same on the Levelling tab and on the shopping list.
+function PB.GoalPicker(parent, changed)
+    local g = CreateFrame("Frame", nil, parent)
+    g:SetSize(200, 22)
+    g.char, g.prof = false, false
+    g.label = g:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    g.label:SetPoint("LEFT", 0, 0)
+    g.label:SetText("Level to")
+    g.buttons = {}
+    for i, t in ipairs(ROUTE_TARGETS) do
+        local b = CreateFrame("Button", nil, g, "UIPanelButtonTemplate")
+        b:SetSize(36, 20)
+        b:SetScript("OnClick", function()
+            if not (g.char and g.prof) then return end
+            PB.SetGoal(g.char, g.prof, t)
+            changed()
+        end)
+        b:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:AddLine("Level to " .. t)
+            GameTooltip:AddLine("The plan and the shopping list go this far. Going further adds to the plan; what is already planned stays.", 1, 1, 1, true)
+            GameTooltip:Show()
+        end)
+        b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        g.buttons[i] = b
+    end
+    g.again = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    g.again:SetSize(76, 20)
+    g.again:SetText("New plan")
+    g.again:SetScript("OnClick", function()
+        if not (g.char and g.prof) then return end
+        PB.NewPlan(g.char, g.prof)
+        changed()
+    end)
+    g.again:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("New plan")
+        GameTooltip:AddLine("The plan stays as it is while you level, so the shopping list only counts down. Click to work it out again from the prices of now and what you have, for example after a new auction house scan.", 1, 1, 1, true)
+        GameTooltip:AddLine("The materials to buy can change.", 1, 0.5, 0.25, true)
+        GameTooltip:Show()
+    end)
+    g.again:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    function g.Update(charKey, prof)
+        g.char, g.prof = charKey or false, prof or false
+        local on = charKey ~= nil and prof ~= nil and (prof.skill or 1) < 300
+        g:SetShown(on)
+        g.again:SetShown(on)
+        if not on then return end
+        local skill, goal = prof.skill or 1, PB.Goal(charKey, prof)
+        local x = 52
+        for i, t in ipairs(ROUTE_TARGETS) do
+            local b = g.buttons[i]
+            b:SetShown(t > skill)
+            if t > skill then
+                b:ClearAllPoints()
+                b:SetPoint("LEFT", x, 0)
+                b:SetText((t == goal and "|cffffd100" or "|cff999999") .. t .. "|r")
+                b.picked = t == goal
+                if b.picked then b:LockHighlight() else b:UnlockHighlight() end
+                x = x + 38
+            end
+        end
+    end
+    return g
+end
+
 local function BuildRoute(prof, target, charLevel, charKey)
     local skill = prof.skill or 1
+    local plan = PlanOf(charKey, prof, true)
+    local byId = {}
     local trainer = prof.line and ns.TrainerRecipes[prof.line] or {}
     -- Level each rank needs, and where it comes from, from the trainer data.
     local rankNeeds = {}
@@ -3551,6 +3652,12 @@ local function BuildRoute(prof, target, charLevel, charKey)
         local cost, value = CraftNumbers(p.recipe)
         p.cost, p.value = cost, value or 0
         p.usable = not p.recipe.noReagents and p.recipe.reagents[1] ~= nil
+        byId[p.id] = p
+    end
+    if plan then
+        for level in pairs(plan.at) do
+            if level < skill then plan.at[level] = nil end -- behind you
+        end
     end
 
     -- Materials the character already has (bags and bank) are paid for: the
@@ -3606,7 +3713,13 @@ local function BuildRoute(prof, target, charLevel, charKey)
         -- The cheapest point among recipes with a good chance; a poor chance
         -- only when nothing better is left at this skill.
         local best, bestScore, bestChance, bestSure
-        for _, p in ipairs(pool) do
+        -- The recipe the plan already has for this point, while it still gives one.
+        local planned = plan and byId[plan.at[level] or 0]
+        if planned and planned.usable and planned.unlock <= level then
+            local chance = SkillUpChance(planned.id, planned.unlock, level)
+            if chance > 0 then best, bestChance = planned, chance end
+        end
+        for _, p in ipairs(best and {} or pool) do
             local cost = p.usable and p.unlock <= level and CostNow(p)
             if cost then
                 local chance = SkillUpChance(p.id, p.unlock, level)
@@ -3619,6 +3732,7 @@ local function BuildRoute(prof, target, charLevel, charKey)
                 end
             end
         end
+        if plan then plan.at[level] = best and best.id or nil end
         if not best then
             gaps[#gaps + 1] = level
             current = nil
@@ -4131,12 +4245,12 @@ local function BuildShoppingFrame()
     f.target:SetScript("OnClick", function()
         local _, prof, view = CurrentSelection()
         if not prof then return end
-        local skill, now = prof.skill or 1, view.target or RouteTarget(prof.skill or 1)
+        local skill, now = prof.skill or 1, PB.Goal(view.char, prof)
         local nextTarget
         for _, t in ipairs(ROUTE_TARGETS) do
             if t > now and t > skill then nextTarget = t break end
         end
-        view.target = nextTarget or RouteTarget(skill)
+        PB.SetGoal(view.char, prof, nextTarget or RouteTarget(skill))
         PageOpeners.route()
     end)
     f.target:SetScript("OnEnter", function(self)
@@ -4237,7 +4351,7 @@ PageOpeners.route = function()
         PageOpeners.professions() -- nothing saved yet: the Recipes tab has the Load button
         return
     end
-    local target = view.target or RouteTarget(prof.skill or 1)
+    local target = PB.Goal(view.char, prof)
     if shop.single or not shop.route or shop.route.char ~= view.char or shop.route.name ~= view.prof
         or shop.route.target ~= target then
         ShowRoute(prof, view.prof, target, view.char)
@@ -4366,6 +4480,14 @@ function RebuildRoute()
     if RefreshDrawer then RefreshDrawer() end
 end
 
+-- The goal or the plan was changed on one of the pickers: the list follows.
+function ns.PlanTouched()
+    if shop.single or not shop.route then return end
+    local prof = RouteProfession()
+    if prof then shop.route.target = PB.Goal(shop.route.char, prof) end
+    RebuildRoute()
+end
+
 -- ------------------------------------------------------------- drawer ------
 
 -- The shopping list as a drawer on the side of the window you are at: the
@@ -4392,7 +4514,7 @@ local function DrawerRoute()
     if shop.single or not CurrentSelection then return end
     local _, prof, view = CurrentSelection()
     if not (prof and view.prof) then return end
-    local target = view.target or RouteTarget(prof.skill or 1)
+    local target = PB.Goal(view.char, prof)
     local r = shop.route
     if not r or r.char ~= view.char or r.name ~= view.prof or r.target ~= target then
         shop.route = { char = view.char, name = view.prof, target = target }
@@ -4430,20 +4552,14 @@ function RefreshDrawer()
     end
     DrawerRoute()
     local f = drawer
-    f.title:SetText(shop.title ~= "" and shop.title or "Shopping list")
     local r = shop.route
-    f.who:SetText(r and not shop.single and (CharacterKeyNow and r.char ~= CharacterKeyNow()
-        and ("|cffff8040For " .. (db.chars[r.char] and db.chars[r.char].name or r.char) .. ", not you|r") or "") or "")
-    -- how far to plan
-    local further
-    if r and not shop.single then
-        for _, t in ipairs(ROUTE_TARGETS) do
-            if t > r.target then further = t break end
-        end
-    end
-    f.plan:SetShown(further ~= nil)
-    if further then f.plan:SetText("Plan to " .. further) end
-    f.plan.target = further or false
+    local other = r and not shop.single and CharacterKeyNow and r.char ~= CharacterKeyNow()
+    f.title:SetText((shop.title ~= "" and shop.title or "Shopping list")
+        .. (other and ("  |cffff8040for " .. (db.chars[r.char] and db.chars[r.char].name or r.char) .. "|r") or ""))
+    -- how far to level, and a new plan
+    local routeProf = r and not shop.single and RouteProfession() or nil
+    if routeProf and routeProf.unloaded then routeProf = nil end
+    f.goal.Update(routeProf and r.char or nil, routeProf)
     local total, missing, anyVendor, shown, done = 0, false, false, 0, 0
     for _, item in ipairs(shop.items) do
         local need = item.need * (shop.single and shop.crafts or 1)
@@ -4529,26 +4645,12 @@ local function BuildDrawer()
     f.title:SetPoint("RIGHT", -16, 0)
     f.title:SetJustifyH("LEFT")
     f.title:SetWordWrap(false)
-    f.who = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    f.who:SetPoint("TOPLEFT", f.title, "BOTTOMLEFT", 0, -4)
-    f.plan = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    f.plan:SetSize(96, 20)
-    f.plan.target = false
-    f.plan:SetPoint("TOPRIGHT", -12, -32)
-    f.plan:SetScript("OnClick", function(self)
-        local _, _, view = CurrentSelection()
-        if view and self.target then
-            view.target = self.target
-            RefreshDrawer()
-        end
+    f.goal = PB.GoalPicker(f, function()
+        ns.PlanTouched()
+        if ns.PlanChanged then ns.PlanChanged() end
     end)
-    f.plan:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:AddLine("How far to plan")
-        GameTooltip:AddLine("The list covers the route to your next skill cap. Click to plan further.", 1, 1, 1, true)
-        GameTooltip:Show()
-    end)
-    f.plan:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    f.goal:SetPoint("TOPLEFT", 16, -34)
+    f.goal.again:SetPoint("TOPRIGHT", -12, -35)
     local head = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     head:SetPoint("TOPLEFT", 16, -62)
     head:SetText("Materials")
@@ -5444,14 +5546,6 @@ function NP.RecipeIcon(id, recipe)
         or (C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(id)) or 134400
 end
 
--- The route's next target after the one planned, or nil to go back to the next cap.
-function NP.NextTarget(prof)
-    local current = PB.view.target or RouteTarget(prof.skill or 1)
-    for _, t in ipairs(ROUTE_TARGETS) do
-        if t > current then return t end
-    end
-end
-
 -- ------------------------------------------------- the game's own pages --
 
 -- The game's pages stay as they are underneath. Hiding them confuses the
@@ -5730,7 +5824,7 @@ function NP.BuildList(prof)
     local nodes = {}
     if NP.mode == "levelling" then
         local char = (db.chars or {})[PB.view.char]
-        local target = PB.view.target or RouteTarget(prof.skill or 1)
+        local target = PB.Goal(PB.view.char, prof)
         local steps, _, _, gaps = ComputeRoute(prof, target, char and char.level, PB.view.char)
         nodes[#nodes + 1] = { header = string.format("Route %d to %d", prof.skill or 1, target) }
         for _, st in ipairs(steps) do
@@ -5799,7 +5893,7 @@ function NP.DrawCraft(char, name, prof, g)
     NP.listBox:SetPoint("BOTTOMLEFT", 0, 0)
     NP.list:ClearAllPoints()
     NP.list:SetPoint("TOPLEFT", 5, -6)
-    NP.list:SetPoint("BOTTOMRIGHT", -5, recipes and 6 or 36)
+    NP.list:SetPoint("BOTTOMRIGHT", -5, recipes and 6 or 62)
     if not char then
         NP.nodes = { { text = "|cff999999Nothing saved yet: open one of your professions once.|r" } }
     elseif not name then
@@ -5841,9 +5935,7 @@ function NP.DrawCraft(char, name, prof, g)
     NP.DrawDetail(prof, name, g)
     -- under the route: how far to plan, and what to buy for it
     local planned = route
-    local further = planned and (NP.NextTarget(prof) or (PB.view.target and RouteTarget(prof.skill or 1))) or nil
-    NP.plan:SetShown(further ~= nil)
-    if further then NP.plan:SetText("Plan to " .. further) end
+    NP.goal.Update(planned and PB.view.char or nil, planned and prof or nil)
     NP.shop:SetShown(planned)
 end
 
@@ -6721,16 +6813,17 @@ function NP.Build(book)
     NP.headerPool, NP.rowPool = {}, {}
     NP.scroll = NP.ScrollBar(NP.list)
     -- Levelling: under the route
-    NP.plan = NP.Button(listBox, "Plan", 110)
-    NP.plan:SetPoint("BOTTOMLEFT", 8, 8)
-    NP.plan:SetScript("OnClick", function()
-        local _, prof = NP.Selection()
-        if not prof then return end
-        PB.view.target = NP.NextTarget(prof)
+    NP.goal = PB.GoalPicker(listBox, function()
         NP.offset, NP.selected = 0, nil
         NP.Refresh()
+        ns.PlanTouched()
     end)
-    NP.Tooltip(NP.plan, "How far to plan", "The route goes to your next skill cap. Click to plan to the cap after it.")
+    NP.goal:SetPoint("BOTTOMLEFT", 10, 34)
+    NP.goal.again:SetPoint("BOTTOMLEFT", 8, 8)
+    -- the shopping list's own picker changed the plan
+    ns.PlanChanged = function()
+        if NP.mode == "levelling" then NP.Refresh() end
+    end
     NP.shop = NP.Button(listBox, "Shopping list", 120)
     NP.shop:SetPoint("BOTTOMRIGHT", -8, 8)
     NP.shop:SetScript("OnClick", function() ns.ToggleShopDrawer() end)

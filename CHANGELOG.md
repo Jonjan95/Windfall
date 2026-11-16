@@ -2,6 +2,14 @@
 
 All changes to Windfall, newest first. After an update, type `/reload` in game (or restart the game when the notes say so).
 
+## [0.2.52] - 2026-11-16
+
+- **The levelling plan holds still.** The plan used to be worked out from scratch every time your bags or skill changed, so buying materials or a price moving could change the recipes, and with them the shopping list (it could ask for more of what you had just bought). Now the plan is saved per character and profession: which recipe each skill point is made with. While you level and shop it stays exactly as it is, and the shopping list only counts down.
+  - It is only worked out again for points it has no recipe for: a further goal, or a recipe that turned grey sooner than expected.
+  - **New plan** (Levelling tab and shopping list) works the whole plan out again from current prices and what you have, for example after a new auction house scan.
+- **Level to 75 / 150 / 225 / 300** replaces the *Plan to ...* button, on the Levelling tab and on the shopping list. The goal picked is lit and remembered per profession. Going further adds to the plan; what was already planned stays.
+- The shopping list names the character in its title when it is for another character.
+
 ## [0.2.51] - 2026-11-16
 
 - **Fix: the levelling route uses what you already bought.** The route is planned again at every skill-up, and it priced every craft as if all its materials still had to be bought. So after a price moved or you learned a new recipe, it could switch halfway to something you had not bought for (Small Silk Pack, needing Heavy Leather, at 134 Tailoring). Materials in your bags and bank now count as already paid for: the route uses them up first and only then goes for the cheapest new materials. A material the auction house has no price for is fine too, as long as you have it.
