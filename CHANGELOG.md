@@ -2,6 +2,11 @@
 
 All changes to Windfall, newest first. After an update, type `/reload` in game (or restart the game when the notes say so).
 
+## [0.2.53] - 2026-11-16
+
+- **Enchanting: the plan knows about rods.** An enchant needs one particular rod (Runed Copper, Silver, Golden, Truesilver or Arcanite Rod) in your bags, and the plan did not look at that, so it could stop at a recipe you had no rod for. Now a recipe whose rod you do not have is only planned when the rod can be made at that skill, and then making the rod comes first as its own step (*Runed Silver Rod x1*), with its materials on the shopping list. A rod you already have, in bags or bank, is never made again.
+  - Which rod a recipe needs comes from the game where it says so, otherwise from the skill the recipe is learned at (the last rod before it).
+
 ## [0.2.52] - 2026-11-16
 
 - **The levelling plan holds still.** The plan used to be worked out from scratch every time your bags or skill changed, so buying materials or a price moving could change the recipes, and with them the shopping list (it could ask for more of what you had just bought). Now the plan is saved per character and profession: which recipe each skill point is made with. While you level and shop it stays exactly as it is, and the shopping list only counts down.

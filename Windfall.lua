@@ -3623,6 +3623,47 @@ function PB.GoalPicker(parent, changed)
     return g
 end
 
+-- Enchanting rods: the skill each is made at, the rod, the recipe that makes
+-- it. An enchant needs one particular rod in your bags.
+local RODS = {
+    { 1, 6218, 7421 },     -- Runed Copper Rod
+    { 100, 6339, 7795 },   -- Runed Silver Rod
+    { 150, 11130, 13628 }, -- Runed Golden Rod
+    { 200, 11145, 13702 }, -- Runed Truesilver Rod
+    { 290, 16207, 20051 }, -- Runed Arcanite Rod
+}
+
+-- Which rod (its place in RODS) a recipe needs, or nil. The game says so for
+-- a recipe where it can (remembered on the recipe); otherwise it goes by the
+-- skill the recipe is learned at: the last rod made before it.
+local function RodNeeded(id, recipe, learnedAt)
+    if recipe.rod ~= nil then return recipe.rod or nil end
+    local T = C_TradeSkillUI
+    local ok, reqs = false, nil
+    if T and T.GetRecipeRequirements then ok, reqs = pcall(T.GetRecipeRequirements, id) end
+    if ok and type(reqs) == "table" and reqs[1] ~= nil then
+        local names, all = {}, true
+        for i, rod in ipairs(RODS) do
+            local name = C_Item and C_Item.GetItemNameByID and C_Item.GetItemNameByID(rod[2])
+            if type(name) == "string" then names[name] = i else all = false end
+        end
+        local found
+        for _, req in ipairs(reqs) do
+            if type(req) == "table" and names[req.name] then found = names[req.name] end
+        end
+        if found or all then
+            recipe.rod = found or false
+            return found
+        end
+    end
+    if not learnedAt then return nil end
+    local needed
+    for i, rod in ipairs(RODS) do
+        if rod[1] < learnedAt or (rod[1] == learnedAt and rod[3] ~= id and i == 1) then needed = i end
+    end
+    return needed
+end
+
 local function BuildRoute(prof, target, charLevel, charKey)
     local skill = prof.skill or 1
     local plan = PlanOf(charKey, prof, true)
@@ -3654,6 +3695,21 @@ local function BuildRoute(prof, target, charLevel, charKey)
         p.usable = not p.recipe.noReagents and p.recipe.reagents[1] ~= nil
         byId[p.id] = p
     end
+    -- Enchanting: the rod each recipe needs, the rods you hold, and the recipes
+    -- that make them. A rod is made once, when the route first needs it.
+    local held, rodMaker = {}, {}
+    if prof.line == 333 and charKey then
+        local learnedAt = {}
+        for _, entry in ipairs(trainer) do
+            if not entry.rank then learnedAt[entry[1]] = entry[2] end
+        end
+        for i, rod in ipairs(RODS) do
+            held[i] = ((HaveCount and HaveCount(charKey, rod[2])) or 0) > 0
+            rodMaker[i] = byId[rod[3]]
+            if rodMaker[i] then rodMaker[i].makes = i end
+        end
+        for _, p in ipairs(pool) do p.rod = RodNeeded(p.id, p.recipe, learnedAt[p.id]) end
+    end
     if plan then
         for level in pairs(plan.at) do
             if level < skill then plan.at[level] = nil end -- behind you
@@ -3669,17 +3725,29 @@ local function BuildRoute(prof, target, charLevel, charKey)
         if stock[id] == nil then stock[id] = (charKey and HaveCount and HaveCount(charKey, id)) or 0 end
         return stock[id]
     end
-    local function CostNow(p)
+    local function CostNow(p, lenient)
         local cost = 0
         for _, r in ipairs(p.recipe.reagents) do
             local short = r[2] - Stock(r[1])
             if short > 0 then
                 local price = ReagentPrice(r[1])
-                if not price then return nil end
-                cost = cost + price * short
+                if price then cost = cost + price * short elseif not lenient then return nil end
             end
         end
         return cost
+    end
+    -- Can this recipe be made at a skill, as far as rods go? A rod you hold is
+    -- not made again; a recipe needs its rod in hand.
+    local function RodOk(p)
+        return not (p.makes and held[p.makes]) and (not p.rod or held[p.rod])
+    end
+    -- The rod a recipe still needs, if it can be made at this skill: its recipe
+    -- and what it costs (a rod is made whatever its materials cost).
+    local function RodFirst(p, level)
+        local maker = rodMaker[p.rod]
+        if maker and maker.usable and maker.unlock <= level and (not maker.rod or held[maker.rod]) then
+            return maker, CostNow(maker, true)
+        end
     end
 
     local steps, crafts, trained, gaps = {}, {}, {}, {}
@@ -3715,22 +3783,37 @@ local function BuildRoute(prof, target, charLevel, charKey)
         local best, bestScore, bestChance, bestSure
         -- The recipe the plan already has for this point, while it still gives one.
         local planned = plan and byId[plan.at[level] or 0]
-        if planned and planned.usable and planned.unlock <= level then
-            local chance = SkillUpChance(planned.id, planned.unlock, level)
+        if planned and planned.usable and planned.unlock <= level and RodOk(planned) then
+            local chance = planned.makes and 1 or SkillUpChance(planned.id, planned.unlock, level)
             if chance > 0 then best, bestChance = planned, chance end
         end
+        local bestRod
         for _, p in ipairs(best and {} or pool) do
-            local cost = p.usable and p.unlock <= level and CostNow(p)
+            local cost = p.usable and p.unlock <= level and not (p.makes and held[p.makes]) and CostNow(p, p.makes ~= nil)
+            -- Needs a rod you do not have: only if the rod can be made now, and
+            -- then the rod comes first. Its cost is spread over a few points.
+            local rod
+            if cost and p.rod and not held[p.rod] then
+                local rodCost
+                rod, rodCost = RodFirst(p, level)
+                cost = rod and (cost + rodCost / TRAIN_SPREAD) or nil
+            end
             if cost then
                 local chance = SkillUpChance(p.id, p.unlock, level)
                 if chance > 0 then
                     local score = PointCost(cost, p.value, chance) + (trained[p.id] and 0 or p.train / TRAIN_SPREAD)
                     local sure = chance >= MIN_CHANCE
                     if not best or (sure and not bestSure) or (sure == bestSure and score < bestScore) then
-                        best, bestScore, bestChance, bestSure = p, score, chance, sure
+                        best, bestScore, bestChance, bestSure, bestRod = p, score, chance, sure, rod
                     end
                 end
             end
+        end
+        -- The rod is this point's craft; the recipe that needed it follows.
+        if bestRod then best = bestRod end
+        if best and best.makes then
+            bestChance = 1
+            held[best.makes] = true
         end
         if plan then plan.at[level] = best and best.id or nil end
         if not best then

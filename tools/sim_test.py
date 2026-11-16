@@ -637,6 +637,28 @@ print(rt.eval(r'''(function()
     out[#out+1] = "stock: 3 bought, 1 unpriced in the bank -> "..first("Stocky-Realm")
     WindfallDB.chars["Stocky-Realm"] = nil
   end
+  -- enchanting: a recipe that needs a rod you do not have puts the rod first
+  do
+    WindfallDB.recipeData = WindfallDB.recipeData or {}
+    local oldRod = WindfallDB.recipeData[7795]
+    WindfallDB.recipeData[7795] = { name = "Runed Silver Rod", item = 6339, qty = 1, reagents = { { 6338, 1 }, { 10940, 6 } } }
+    local prof = { line = 333, skill = 140, max = 150, recipes = {
+      [13503] = { name = "Lesser Striking", diff = "optimal", qty = 1, reagents = { { 2318, 1 } } } } }
+    WindfallDB.chars["Roddy-Realm"] = { professions = {}, bags = { [6218] = 1 } }
+    local function route()
+      local steps, items = WF_NS.dev.Route(prof, 145, 40, "Roddy-Realm")
+      local t = {}
+      for _, st in ipairs(steps) do if st.p then t[#t+1] = st.p.recipe.name.." "..st.from.."-"..st.to.." x"..math.ceil(st.crafts - 0.001) end end
+      local m = {}
+      for _, it in ipairs(items) do m[#m+1] = it.id.."x"..it.need end
+      return table.concat(t, ", ").." | materials "..table.concat(m, " ")
+    end
+    out[#out+1] = "rod: only the copper rod -> "..route()
+    WindfallDB.chars["Roddy-Realm"].bags[6339] = 1
+    out[#out+1] = "rod: silver rod in the bags -> "..route()
+    WindfallDB.chars["Roddy-Realm"] = nil; WindfallDB.recipeData[7795] = oldRod
+    if WindfallDB.plans then WindfallDB.plans["Roddy-Realm|333"] = nil end
+  end
   -- the auction house: the drawer comes out by itself, as it was left
   AuctionHouseFrame.shown = true; ev2(nil, "AUCTION_HOUSE_SHOW"); runTimers()
   out[#out+1] = "drawer: auction house opens -> tab shown="..tostring(DT:IsShown()).." drawer shown="..tostring(DR:IsShown())
