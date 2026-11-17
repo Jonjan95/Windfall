@@ -2,6 +2,10 @@
 
 All changes to Windfall, newest first. After an update, type `/reload` in game (or restart the game when the notes say so).
 
+## [0.2.56] - 2026-11-17
+
+- The addon list shows the name as plain *Windfall*; it used to carry an old version number.
+
 ## [0.2.55] - 2026-11-16
 
 - **Buff food reminder: settings.** Under *Remind me to eat buff food* in Settings:

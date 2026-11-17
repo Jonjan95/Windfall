@@ -10,7 +10,7 @@ A World of Warcraft Forever addon for making and spending gold well: what your f
 - **Five tabs under the window:** **Recipes**, **Levelling**, **Make money**, **Farming** and **Fishing** (when the character you are on fishes).
 - **At the top**, on Recipes and Levelling: the character button lists every character with its professions, so any profession on your account is one click away; the icons are that character's professions, and a skill bar shows where the picked one is. It opens on the character you are playing. The gear holds the general settings.
 - **The bar** stays on screen: your gold per hour and session time (click for the Session page), a fish switch (fishing key on or off, right-click to choose the key), a flower switch (node sparkles on or off), and the Windfall icon. Drag it wherever you like.
-- **The shopping list** docks next to the auction house or a vendor when there is something on it to buy there; *Shopping list* on the Levelling page opens it beside the profession window.
+- **The shopping list** is a drawer on the auction house and vendor windows: click the Windfall tab on their right edge to pull it out. *Shopping list* on the Levelling page opens it beside the profession window.
 
 ## Farming
 
